@@ -1,0 +1,26 @@
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Node.js
+node_modules/
+apps/dashboard/dist/
+npm-debug.log*
+
+# Go build artifacts
+*.exe
+*.test
+*.out
+coverage.out
+
+# IDE and operating system
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Local data and generated files
+data/
+logs/
+*.log
