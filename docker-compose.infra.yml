@@ -1,0 +1,68 @@
+# NATS JetStream + ClickHouse for local development. Application services run on the host.
+# Required in .env (not committed): NATS_AUTH_TOKEN, CH_ADMIN_PASSWORD, CH_WRITER_PASSWORD, CH_READER_PASSWORD
+# Ports are published on 127.0.0.1 only.
+name: eoa-infra
+
+services:
+  nats:
+    image: nats:2.10-alpine
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    environment:
+      NATS_AUTH_TOKEN: ${NATS_AUTH_TOKEN:?set NATS_AUTH_TOKEN in .env}
+    volumes:
+      - ./infra/nats/nats-server.conf:/etc/nats/nats-server.conf:ro
+      - nats-data:/data
+    ports:
+      - "127.0.0.1:4222:4222"
+      - "127.0.0.1:8222:8222"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  nats-init:
+    image: natsio/nats-box:0.14.5
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      NATS_AUTH_TOKEN: ${NATS_AUTH_TOKEN:?set NATS_AUTH_TOKEN in .env}
+    volumes:
+      - ./scripts/nats-init.sh:/nats-init.sh:ro
+      - ./infra/nats/streams:/streams:ro
+    entrypoint: ["/bin/sh", "-c", "tr -d '\\r' < /nats-init.sh > /tmp/init.sh && sh /tmp/init.sh"]
+    restart: "no"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      CLICKHOUSE_USER: admin
+      CLICKHOUSE_PASSWORD: ${CH_ADMIN_PASSWORD:?set CH_ADMIN_PASSWORD in .env}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "0"
+      CH_WRITER_PASSWORD: ${CH_WRITER_PASSWORD:?set CH_WRITER_PASSWORD in .env}
+      CH_READER_PASSWORD: ${CH_READER_PASSWORD:?set CH_READER_PASSWORD in .env}
+    volumes:
+      # Schema runs once, on first start with an empty data volume.
+      - ./infra/clickhouse/init:/docker-entrypoint-initdb.d:ro
+      # Mounted as a single file so the entrypoint can still write its own users.d files.
+      - ./infra/clickhouse/users.d/users.xml:/etc/clickhouse-server/users.d/eoa-users.xml:ro
+      - ch-data:/var/lib/clickhouse
+    ports:
+      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:9000:9000"
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  nats-data:
+  ch-data:

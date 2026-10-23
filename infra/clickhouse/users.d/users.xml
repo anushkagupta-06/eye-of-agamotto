@@ -1,0 +1,34 @@
+<clickhouse>
+  <!-- The admin/default user is created by the image from CLICKHOUSE_USER / CLICKHOUSE_PASSWORD.
+       Application users below read their passwords from environment variables. -->
+  <profiles>
+    <writer_profile>
+      <max_execution_time>60</max_execution_time>
+      <max_insert_threads>4</max_insert_threads>
+    </writer_profile>
+    <reader_profile>
+      <readonly>1</readonly>
+      <max_execution_time>10</max_execution_time>
+      <max_memory_usage>4000000000</max_memory_usage>
+      <max_result_rows>100000</max_result_rows>
+      <result_overflow_mode>break</result_overflow_mode>
+      <max_rows_to_read>2000000000</max_rows_to_read>
+    </reader_profile>
+  </profiles>
+  <users>
+    <!-- Containers see host connections as coming from the Docker bridge, so the network list
+         is open here; the compose file publishes ports on 127.0.0.1 only. Tighten for production. -->
+    <writer>
+      <password from_env="CH_WRITER_PASSWORD"/>
+      <profile>writer_profile</profile>
+      <networks><ip>::/0</ip></networks>
+      <allow_databases><database>observability</database></allow_databases>
+    </writer>
+    <query_api>
+      <password from_env="CH_READER_PASSWORD"/>
+      <profile>reader_profile</profile>
+      <networks><ip>::/0</ip></networks>
+      <allow_databases><database>observability</database></allow_databases>
+    </query_api>
+  </users>
+</clickhouse>
