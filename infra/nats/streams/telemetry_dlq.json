@@ -1,0 +1,15 @@
+{
+  "name": "TELEMETRY_DLQ",
+  "subjects": ["telemetry.dlq.>"],
+  "retention": "limits",
+  "storage": "file",
+  "num_replicas": 1,
+  "discard": "old",
+  "max_age": 604800000000000,
+  "max_bytes": 1073741824,
+  "max_msg_size": 4194304,
+  "duplicate_window": 120000000000,
+  "max_msgs": -1,
+  "max_consumers": -1,
+  "max_msgs_per_subject": -1
+}
