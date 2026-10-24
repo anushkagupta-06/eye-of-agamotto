@@ -25,3 +25,5 @@ data/
 logs/
 *.log
 .data
+
+docs\contracts\ingestion-setup.md
