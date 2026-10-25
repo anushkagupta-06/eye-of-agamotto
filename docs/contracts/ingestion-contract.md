@@ -22,12 +22,16 @@ Frozen once Anushka and Meenakshi sign off. Changes go through a PR touching thi
 - `Content-Type`: `application/x-protobuf`
 
 **Consumers:** each service creates its own durable pull consumer (`CreateOrUpdateConsumer`), explicit ack,
-`ack_wait` 30 s, `max_deliver` 10.
+`ack_wait` 60 s, unlimited `max_deliver` (an unreachable database must never cause messages to be
+abandoned; poison messages are removed explicitly, see below).
 - writer: `writer-traces`, `writer-logs` (same durable name across replicas = work sharing)
 - processing: `proc-traces`, `proc-logs` (separate durables, so both see every message)
 
-**Dead letter:** a message that cannot be decoded or hits `max_deliver` is republished by its consumer to
-`telemetry.dlq.<traces|logs>` with headers `X-Error`, `X-Original-Subject`, `X-Delivery-Count`, then acked.
+**Dead letter:** a message that cannot be decoded, has no `X-Tenant-Id`, or is rejected by the database for
+data reasons (isolated by bisecting the batch) is republished by its consumer to `telemetry.dlq.<traces|logs>`
+with headers `X-Error`, `X-Stage` (`decode` or `insert`), `X-Original-Subject`, `X-Delivery-Count`,
+`X-Tenant-Id`, and then terminated (`Term`) so it is not redelivered. The payload is the original, unmodified
+message, so it can be replayed after a fix. Database outages never dead-letter: those retry with backoff.
 
 **Delivery semantics:** at-least-once. Consumers must be idempotent.
 
@@ -51,3 +55,20 @@ Proposed for processing: `edge_events` (insert), `anomalies` (insert/read).
 - Trace by ID: read `trace_index` for `first_seen`/`last_seen`, then query `spans` with a `start_time` bound.
 - Rollups: `quantilesTDigestMerge(0.5, 0.95, 0.99)(duration_q)`, `sum(calls)`, `sum(errors)`.
 - Query API connects as `query_api` (read-only, resource limits). Writer connects as `writer`.
+
+## 3. Writer behaviour (services/writer)
+
+- **Batching:** each worker fetches up to 32 messages (or whatever arrives within 1 s) and performs one bulk
+  insert for all of them. Workers per signal: 2 by default.
+- **Ack after insert:** messages are acknowledged only once the insert succeeded.
+- **Retry:** a failed insert negatively acknowledges the whole batch with a delay that doubles per delivery
+  (1 s, 2 s, 4 s ... capped at 30 s). Data stays in the stream (24 h retention) while ClickHouse is down.
+- **Deduplication:** each insert carries `insert_deduplication_token = <signal>-<hash of stream sequences>`, so
+  redelivering the same messages together is dropped by ClickHouse (see `002_dedup_window.sql`). If messages
+  are redelivered in a different grouping, `spans` is deduplicated at merge time by `ReplacingMergeTree`;
+  `logs` has no natural key, so rare duplicate log rows are possible after a crash. This is the accepted
+  at-least-once trade-off.
+- **Timestamps:** a log with neither `time_unix_nano` nor `observed_time_unix_nano` gets the gateway's
+  `X-Received-At`.
+- **Attribute encoding:** scalars as text, arrays and maps as JSON, bytes as base64. Instrumentation scope
+  name/version, span events and span links are not stored in v1.
