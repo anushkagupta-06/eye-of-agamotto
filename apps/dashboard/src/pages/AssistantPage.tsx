@@ -268,6 +268,55 @@ export const AssistantPage: React.FC = () => {
             )}
           </div>
 
+          {/* Quick Action Suggestion Chips */}
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+            {[
+              {
+                icon: '🚨',
+                label: 'Diagnose failing services & generate code fixes',
+                query: 'Diagnose all currently failing or degraded services, identify the root cause, and give me production-ready code fixes.',
+              },
+              {
+                icon: '🛠️',
+                label: 'Suggest Circuit Breaker & retry strategy',
+                query: 'Recommend a resilient circuit breaker and exponential backoff configuration with code for our slowest service.',
+              },
+              {
+                icon: '📈',
+                label: 'Explain p99 latency spike anomaly',
+                query: 'Analyze the active anomalies and explain why the p99 latency spiked so high above the baseline standard deviation.',
+              },
+              {
+                icon: '🛡️',
+                label: 'Prevent upstream cascading timeouts',
+                query: 'How do I prevent timeouts in downstream services from propagating back to the API gateway?',
+              },
+            ].map((chip, idx) => (
+              <button
+                key={idx}
+                type="button"
+                className="btn-secondary"
+                onClick={() => handleSendQuery(chip.query)}
+                disabled={isLoading}
+                style={{
+                  fontSize: '0.74rem',
+                  padding: '5px 10px',
+                  borderRadius: '20px',
+                  backgroundColor: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid var(--border-subtle)',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>{chip.icon}</span>
+                <span>{chip.label}</span>
+              </button>
+            ))}
+          </div>
+
           {/* Input Bar */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '14px', display: 'flex', gap: '10px' }}>
             <input
