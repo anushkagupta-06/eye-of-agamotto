@@ -5,12 +5,12 @@ import { AnomaliesAlertBanner } from '../components/dashboard/AnomaliesAlertBann
 import { ServiceHealthTable } from '../components/dashboard/ServiceHealthTable';
 import { ThroughputChart } from '../components/dashboard/ThroughputChart';
 import { RecentActivityFeed } from '../components/dashboard/RecentActivityFeed';
-import { Terminal, ShieldCheck, Plus, Check, Layers, CheckCircle2, ArrowDown } from 'lucide-react';
+import { Terminal, Plus, Check, Layers, CheckCircle2, ArrowDown } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 
 export const DashboardOverview: React.FC = () => {
-  const { tenant, systemProfileName, systemProfileDescription, addCustomServiceTelemetry } = useTelemetry();
+  const { systemProfileName, addCustomServiceTelemetry } = useTelemetry();
   const [showAddModal, setShowAddModal] = useState(false);
   const [customServiceName, setCustomServiceName] = useState('');
   const [justAdded, setJustAdded] = useState(false);
@@ -35,15 +35,12 @@ export const DashboardOverview: React.FC = () => {
       {/* Top Banner / Title */}
       <div className="page-header">
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <h1 className="page-title">Distributed Telemetry Overview</h1>
             <span className="badge healthy" style={{ fontSize: '0.72rem' }}>
               <Layers size={11} /> {systemProfileName}
             </span>
           </div>
-          <p className="page-desc">
-            {systemProfileDescription} Tenant: <strong style={{ color: 'var(--accent-emerald)' }}>{tenant}</strong>.
-          </p>
         </div>
 
         <div style={{ display: 'flex', gap: '10px' }}>
@@ -63,15 +60,6 @@ export const DashboardOverview: React.FC = () => {
           >
             <Terminal size={14} />
             <span>Ingest Smoke Test</span>
-          </button>
-          <button
-            className="btn-primary"
-            onClick={() => {
-              window.open('/assistant', '_self');
-            }}
-          >
-            <ShieldCheck size={14} />
-            <span>AI Telemetry Inspector</span>
           </button>
         </div>
       </div>

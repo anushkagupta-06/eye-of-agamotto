@@ -466,11 +466,12 @@ body {
 .pipeline-card {
   background-color: var(--bg-surface);
   border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  padding: 14px 16px;
+  border-radius: 8px;
+  padding: 8px 14px;
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
 }
 
 .pipeline-card-info {
@@ -742,4 +743,18 @@ body {
   text-overflow: ellipsis;
   max-width: 100%;
   text-align: center;
+}
+
+/* Anomalies Responsive Two-Column Layout */
+.anomalies-two-col {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .anomalies-two-col {
+    grid-template-columns: 1fr;
+  }
 }

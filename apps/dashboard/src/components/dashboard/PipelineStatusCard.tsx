@@ -26,7 +26,7 @@ export const PipelineStatusCard: React.FC = () => {
       <div className="pipeline-grid">
         {pipelineStatus.map((comp) => (
           <div key={comp.name} className="pipeline-card">
-            <div style={{ padding: '6px', borderRadius: '6px', background: 'var(--bg-card)' }}>
+            <div style={{ padding: '6px', borderRadius: '6px', background: 'var(--bg-card)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               {getIcon(comp.name)}
             </div>
             <div className="pipeline-card-info">
@@ -34,7 +34,6 @@ export const PipelineStatusCard: React.FC = () => {
                 <span>{comp.name}</span>
                 <span className="badge healthy">{comp.latency}</span>
               </div>
-              <div className="pipeline-details">{comp.details}</div>
             </div>
           </div>
         ))}
