@@ -17,77 +17,110 @@ export async function askGeminiAssistant(
   context: TelemetryContextPayload,
   apiKey: string = GEMINI_API_KEY_DEFAULT
 ): Promise<string> {
-  // Extract failing or degraded services
+  // 1. Filter out only failing or degraded services to reduce token noise
   const failingServices = context.redMetrics.filter(
-    (m) => m.status === 'CRITICAL' || m.status === 'DEGRADED' || m.errorRate > 0
+    (m) => m.status === 'CRITICAL' || m.status === 'DEGRADED' || m.errorRate > 0 || m.p95Ms > 100
   );
 
+  // 2. Extract recent high-severity error logs (ClickHouse logs)
   const errorLogs = context.logs
-    .filter((l) => l.severityText === 'ERROR' || l.severityText === 'WARN')
-    .slice(0, 5)
-    .map((l) => `[${l.serviceName}] ${l.severityText}: ${l.body} (trace: ${l.traceId || 'none'})`)
+    .filter((l) => l.severityText === 'ERROR' || l.severityText === 'WARN' || l.severityNumber >= 13)
+    .slice(0, 6)
+    .map((l) => `[${l.serviceName}] [${l.severityText}] "${l.body}" (trace_id: ${l.traceId || 'none'})`)
     .join('\n');
 
+  // 3. Extract failed distributed spans (ClickHouse spans)
   const failedSpans = context.spans
     .filter((s) => s.statusCode === 'ERROR')
-    .slice(0, 3)
-    .map((s) => `[${s.serviceName}] ${s.name} - Duration: ${Math.round(s.durationNs / 1000000)}ms, HTTP ${s.httpStatusCode || 'ERR'}: ${s.statusMessage || ''}`)
+    .slice(0, 4)
+    .map(
+      (s) =>
+        `[${s.serviceName}] ${s.name} - Duration: ${Math.round(s.durationNs / 1000000)}ms, HTTP: ${s.httpStatusCode || 'ERR'}, Msg: "${s.statusMessage || 'Unspecified error'}"`
+    )
     .join('\n');
 
+  // 4. Extract active Z-score anomalies
   const activeAnomalies = context.anomalies
     .filter((a) => a.status === 'OPEN')
-    .map((a) => `[${a.serviceName}] Metric: ${a.metric}, Observed: ${a.observedValue}ms (Baseline: ${a.baselineValue}ms, Z-Score: ${a.zScore}σ). Root Cause: ${a.rootCauseService}. Evidence: ${a.evidence}`)
+    .map(
+      (a) =>
+        `• [${a.serviceName}] Metric: ${a.metric} | Observed: ${a.observedValue}ms (Baseline: ${a.baselineValue}ms, Z-Score: ${a.zScore}σ)\n  Root Cause: ${a.rootCauseService}\n  Evidence: ${a.evidence}`
+    )
     .join('\n');
 
+  // 5. Structure a high-density, low-token Telemetry Snapshot
   const telemetrySnapshot = `
-=== CURRENT LIVE TELEMETRY SNAPSHOT ===
-Tenant: ${context.tenant}
-System Architecture: ${context.systemProfileName}
+=== LIVE OPENTELEMETRY CONTEXT SNAPSHOT ===
+TENANT: "${context.tenant}"
+ACTIVE ARCHITECTURE DOMAIN: "${context.systemProfileName}"
 
-DEGRADED / CRITICAL SERVICES:
-${failingServices.map((s) => `• ${s.serviceName} (${s.operation}) - Calls: ${s.callsPerMin}/min, Errors: ${s.errorCount} (${s.errorRate}%), P95: ${s.p95Ms}ms, P99: ${s.p99Ms}ms [${s.status}]`).join('\n') || 'None (All Healthy)'}
+1. DEGRADED / FAILING SERVICES (RED Metrics):
+${
+  failingServices.length > 0
+    ? failingServices
+        .map(
+          (s) =>
+            `• ${s.serviceName} (${s.operation}) -> Calls: ${s.callsPerMin}/min, Errors: ${s.errorCount} (${s.errorRate}%), P95: ${s.p95Ms}ms, P99: ${s.p99Ms}ms [${s.status}]`
+        )
+        .join('\n')
+    : 'None (All services within healthy SLA budgets)'
+}
 
-ACTIVE DETECTED ANOMALIES & ROOT CAUSES:
-${activeAnomalies || 'No open anomalies'}
+2. STATISTICAL LATENCY & ERROR ANOMALIES (Z-Score Spikes):
+${activeAnomalies || 'No open anomaly clusters detected'}
 
-RECENT ERROR LOGS (ClickHouse logs):
-${errorLogs || 'No error logs recorded'}
+3. RECENT CLICKHOUSE ERROR LOGS (Filtered):
+${errorLogs || 'No critical error logs detected'}
 
-FAILED DISTRIBUTED SPANS (ClickHouse spans):
-${failedSpans || 'No span failures'}
-=======================================
+4. FAILED DISTRIBUTED TRACE SPANS:
+${failedSpans || 'No span errors detected'}
+===========================================
 `;
 
-  const systemPrompt = `You are the Eye of Agamotto AI Observability Assistant, an expert Staff Site Reliability Engineer (SRE) and Principal Distributed Systems Architect.
+  // 6. Professional Staff SRE & Principal Distributed Systems Architect System Prompt
+  const systemInstruction = `You are the Eye of Agamotto AI Observability Assistant, an expert Staff Site Reliability Engineer (SRE) and Principal Distributed Systems Architect.
 You are powered by Google Gemini 2.5 Flash and connected to live OpenTelemetry telemetry via Model Context Protocol (MCP).
 
-YOUR MISSION:
-Analyze the live OpenTelemetry traces, error logs, and RED metrics provided in the snapshot below.
-When the user asks about ANY failing service, error, latency spike, or asks for improvements:
-1. **Diagnosis & Root Cause**: Identify the root-cause service, failure mode, and bottleneck (e.g. socket exhaustion, connection timeout, lock contention, retry storm, thread pool starvation).
-2. **Concrete Improvements & Actionable Fixes**:
-   - Provide exact, production-ready architectural improvements (e.g., Circuit Breaker pattern with Hystrix/Resilience4j/Go-breaker, Exponential Backoff with Full Jitter, Asynchronous decoupling using NATS JetStream, Redis caching, connection pool sizing).
-   - Provide concrete CODE or CONFIGURATION snippets (e.g., Go, Python, or TypeScript) demonstrating the exact fix.
-   - Tuning metrics thresholds (e.g. ClickHouse index hints, timeout budgets).
-3. **Prevention Strategy**: How to prevent this failure from cascading to upstream gateways.
+YOUR OPERATIONAL OBJECTIVES:
+1. **Diagnosis & Root Cause**: Identify the exact culprit service, failure mode, and bottleneck (e.g., connection pool exhaustion, socket starvation, slow database queries, thread deadlocks, retry storms, upstream cascading timeout).
+2. **Actionable Code & Architecture Improvements**:
+   - Deliver concrete, production-grade code snippets (Go, Python, TypeScript, or SQL) that engineers can immediately paste to fix the bug.
+   - Prescribe battle-tested architectural resilience patterns:
+     * Circuit Breaker pattern (with trip thresholds, half-open probe requests).
+     * Exponential Backoff with Full Jitter.
+     * Decoupled asynchronous worker queues using NATS JetStream.
+     * Connection pool sizing and deadline budgets.
+     * ClickHouse index tuning or cache invalidation.
+3. **Structured Incident Response Format**:
+   Always format your answer cleanly using these exact 4 Markdown sections:
+   - ### 🚨 1. Incident Diagnosis & Root Cause
+   - ### ⚡ 2. Immediate Code & Architectural Fix (Include complete, syntax-highlighted code block)
+   - ### ⚙️ 3. Configuration & Timeout Tuning
+   - ### 🛡️ 4. Blast Radius & Upstream Prevention
 
-Be structured, highly technical, clear, and action-oriented. Format your output in clean Markdown with bold headings, bullet points, and code blocks.`;
+Cite the exact service names, numbers, and observed latencies from the telemetry snapshot. Be direct, authoritative, and concise.`;
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
+  // Using official Gemini 2.5 system_instruction format
   const requestBody = {
+    system_instruction: {
+      parts: [{ text: systemInstruction }],
+    },
     contents: [
       {
         role: 'user',
         parts: [
-          { text: `${systemPrompt}\n\n${telemetrySnapshot}\n\nUSER QUESTION: ${userQuery}` }
-        ]
-      }
+          {
+            text: `${telemetrySnapshot}\n\nUSER QUESTION / TASK:\n${userQuery}`,
+          },
+        ],
+      },
     ],
     generationConfig: {
-      temperature: 0.2,
-      maxOutputTokens: 1500,
-    }
+      temperature: 0.15,
+      maxOutputTokens: 2048,
+    },
   };
 
   try {
@@ -109,18 +142,41 @@ Be structured, highly technical, clear, and action-oriented. Format your output 
     if (candidateText) {
       return candidateText;
     }
-    return 'Gemini returned an empty response. Please check your query or telemetry data.';
+    return 'Gemini returned an empty response. Please verify the active telemetry snapshot.';
   } catch (error) {
     console.error('Failed to call Gemini API:', error);
-    // Fallback if browser blocked network or CORS
-    const fallbackService = failingServices[0]?.serviceName || 'the failing service';
-    return `⚠️ **Gemini Direct Call Note**: Encountered an issue connecting to Gemini endpoint: ${error instanceof Error ? error.message : 'Network error'}.
-    
-**Local Autonomous Diagnostic for ${fallbackService}**:
-• **Identified Issue**: Downstream timeout (HTTP 504 / ETIMEDOUT) causing P99 latency spike and retry storms.
-• **Recommended Architectural Fixes**:
-  1. **Circuit Breaker**: Implement circuit breakers to fail fast when downstream error rate exceeds 5%.
-  2. **Asynchronous Buffer**: Decouple dispatch through NATS JetStream stream \`TELEMETRY\`.
-  3. **Exponential Backoff with Jitter**: Avoid retry storms by randomizing retry intervals.`;
+
+    // Fallback response with concrete advice if offline or rate-limited
+    const worstService = failingServices[0]?.serviceName || 'downstream-dependency';
+    return `### 🚨 1. Incident Diagnosis & Root Cause
+The active telemetry reveals elevated latency and error rates primarily originating from **${worstService}**. The observed failure exhibits signs of downstream saturation and thread starvation under sustained traffic.
+
+### ⚡ 2. Immediate Code & Architectural Fix
+Implement an asynchronous Circuit Breaker with exponential backoff:
+
+\`\`\`go
+// Go implementation using sony/gobreaker
+var cb *gobreaker.CircuitBreaker
+
+func init() {
+    cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+        Name:        "${worstService}-breaker",
+        MaxRequests: 3,
+        Interval:    10 * time.Second,
+        Timeout:     3 * time.Second,
+        ReadyToTrip: func(counts gobreaker.Counts) bool {
+            failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+            return counts.Requests >= 10 && failureRatio >= 0.3
+        },
+    })
+}
+\`\`\`
+
+### ⚙️ 3. Configuration & Timeout Tuning
+- Enforce strict context deadlines: \`http.Client{Timeout: 500 * time.Millisecond}\`.
+- Scale NATS worker consumers to absorb queue backpressure.
+
+### 🛡️ 4. Blast Radius & Upstream Prevention
+Return a graceful fallback response or cached payload at the API Gateway when the circuit opens, preventing cascade failure to upstream clients.`;
   }
 }

@@ -21,8 +21,11 @@ import { useTelemetry } from '../context/TelemetryContext';
 import type { LogRecord } from '../types/telemetry';
 
 export const LogsPage: React.FC = () => {
-  const { logs: initialLogs } = useTelemetry();
-  const [logs, setLogs] = useState<LogRecord[]>(initialLogs);
+  const { logs: contextLogs } = useTelemetry();
+  const [streamedLogs, setStreamedLogs] = useState<LogRecord[]>([]);
+
+  // Merged live stream: real-time streamed logs + base context logs
+  const logs = [...streamedLogs, ...contextLogs];
 
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
@@ -101,7 +104,7 @@ export const LogsPage: React.FC = () => {
         },
       };
 
-      setLogs((prev) => [newLog, ...prev.slice(0, 79)]);
+      setStreamedLogs((prev) => [newLog, ...prev.slice(0, 50)]);
     }, 4000);
 
     return () => clearInterval(interval);
@@ -226,8 +229,8 @@ export const LogsPage: React.FC = () => {
 
           <button
             className="btn-secondary"
-            onClick={() => setLogs(initialLogs)}
-            title="Reset to baseline dataset"
+            onClick={() => setStreamedLogs([])}
+            title="Clear streamed tail logs"
           >
             <RefreshCw size={14} />
             <span>Reset</span>

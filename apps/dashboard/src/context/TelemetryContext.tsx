@@ -90,38 +90,63 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       status: 'HEALTHY',
     };
 
-    const newSpan: Span = {
+    const gatewayService = redMetrics.find((m) => /gateway|ingress|router/i.test(m.serviceName))?.serviceName || 'api-gateway';
+    const traceId = 'c' + Math.random().toString(16).slice(2, 17) + Math.random().toString(16).slice(2, 17);
+    const rootSpanId = 'r' + Math.random().toString(16).slice(2, 17);
+    const childSpanId = 's' + Math.random().toString(16).slice(2, 17);
+
+    const now = new Date();
+    const childTime = new Date(now.getTime() + 10);
+
+    const rootSpan: Span = {
       tenantId: tenant,
-      traceId: 'custom' + Math.random().toString(16).slice(2, 18) + '0000000000000000',
-      spanId: 'c' + Math.random().toString(16).slice(2, 17),
+      traceId,
+      spanId: rootSpanId,
       parentSpanId: '',
+      serviceName: gatewayService,
+      name: `PROXY /api/v1/${cleanName}`,
+      kind: 'SERVER',
+      startTime: now.toISOString(),
+      durationNs: 65000000,
+      statusCode: 'OK',
+      httpStatusCode: 200,
+      attributes: { 'http.route': `/api/v1/${cleanName}` },
+      resourceAttributes: { 'service.name': gatewayService },
+      ingestedAt: now.toISOString(),
+    };
+
+    const childSpan: Span = {
+      tenantId: tenant,
+      traceId,
+      spanId: childSpanId,
+      parentSpanId: rootSpanId,
       serviceName: cleanName,
       name: 'POST /v1/process',
       kind: 'SERVER',
-      startTime: new Date().toISOString(),
+      startTime: childTime.toISOString(),
       durationNs: 45000000,
       statusCode: 'OK',
       httpStatusCode: 200,
       attributes: { 'custom.registered': 'true' },
       resourceAttributes: { 'service.name': cleanName, 'environment': 'custom' },
-      ingestedAt: new Date().toISOString(),
+      ingestedAt: childTime.toISOString(),
     };
 
     const newLog: LogRecord = {
       tenantId: tenant,
-      timestamp: new Date().toISOString(),
+      timestamp: now.toISOString(),
       serviceName: cleanName,
       severityText: 'INFO',
       severityNumber: 9,
       body: `Custom microservice ${cleanName} registered and actively emitting OpenTelemetry spans`,
-      traceId: newSpan.traceId,
-      spanId: newSpan.spanId,
+      traceId: traceId,
+      spanId: childSpanId,
       attributes: { 'status': 'READY' },
       resourceAttributes: { 'service.name': cleanName },
     };
 
-    setRedMetrics((prev) => [newMetric, ...prev.filter((m) => m.serviceName !== cleanName)]);
-    setSpans((prev) => [newSpan, ...prev]);
+    setRedMetrics((prev) => [...prev.filter((m) => m.serviceName !== cleanName), newMetric]);
+    setSpans((prev) => [childSpan, rootSpan, ...prev]);
     setLogs((prev) => [newLog, ...prev]);
   };
 

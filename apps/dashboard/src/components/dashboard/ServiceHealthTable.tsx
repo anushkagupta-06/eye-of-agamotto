@@ -31,7 +31,7 @@ export const ServiceHealthTable: React.FC = () => {
   };
 
   return (
-    <div className="panel-card">
+    <div className="panel-card" id="service-red-table">
       <div className="panel-title">
         <div>
           <span>Service RED Metrics</span>

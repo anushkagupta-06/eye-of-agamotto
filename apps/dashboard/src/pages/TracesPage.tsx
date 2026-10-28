@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Filter, Clock, AlertCircle, CheckCircle2, Layers } from 'lucide-react';
+import { Filter, Clock, AlertCircle, CheckCircle2, Layers, FileText, ArrowUpRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 import type { Span } from '../types/telemetry';
 
@@ -19,6 +20,7 @@ export const TracesPage: React.FC = () => {
 
   const relatedSpans = spans.filter((s) => s.traceId === selectedSpan?.traceId);
   const maxDuration = Math.max(...relatedSpans.map((s) => s.durationNs), 1);
+  const traceStartTimeMs = Math.min(...relatedSpans.map((s) => new Date(s.startTime).getTime()));
 
   return (
     <div>
@@ -58,7 +60,7 @@ export const TracesPage: React.FC = () => {
             color: 'var(--text-primary)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '6px',
-            padding: '6px 10px',
+            padding: '6px 12px',
             fontSize: '0.8rem',
             outline: 'none',
           }}
@@ -80,32 +82,34 @@ export const TracesPage: React.FC = () => {
             color: 'var(--text-primary)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '6px',
-            padding: '6px 10px',
+            padding: '6px 12px',
             fontSize: '0.8rem',
             outline: 'none',
           }}
         >
           <option value="ALL">All Statuses</option>
-          <option value="ERROR">Errors Only</option>
           <option value="OK">OK Only</option>
+          <option value="ERROR">Errors Only</option>
         </select>
 
-        <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
-          Showing {filteredSpans.length} traces from ClickHouse
-        </span>
+        <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          Showing <strong>{filteredSpans.length}</strong> of {spans.length} spans
+        </div>
       </div>
 
-      {/* Two Column Layout: Traces List on Left, Waterfall / Flamegraph on Right */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.8fr', gap: '20px' }}>
-        {/* Left: Traces List */}
-        <div className="panel-card" style={{ padding: '0', overflow: 'hidden' }}>
-          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600, fontSize: '0.88rem' }}>
-            Trace Index Stream
+      {/* Two-Column Trace Explorer */}
+      <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '20px', alignItems: 'start' }}>
+        {/* Left: Span List */}
+        <div className="panel-card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600, fontSize: '0.88rem' }}>
+            Ingested Spans ({filteredSpans.length})
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
+
+          <div style={{ maxHeight: '640px', overflowY: 'auto' }}>
             {filteredSpans.map((span) => {
               const isSelected = selectedSpan?.spanId === span.spanId;
               const durationMs = Math.round(span.durationNs / 1000000);
+
               return (
                 <div
                   key={span.spanId}
@@ -150,25 +154,42 @@ export const TracesPage: React.FC = () => {
               <Layers size={18} style={{ color: 'var(--accent-emerald)' }} />
               <span>Trace Waterfall Timeline</span>
             </div>
-            <span className="code-pill">trace_id: {selectedSpan?.traceId}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <span className="code-pill">trace_id: {selectedSpan?.traceId}</span>
+              <Link
+                to={`/logs?traceId=${selectedSpan?.traceId}`}
+                className="btn-secondary"
+                style={{ padding: '4px 10px', fontSize: '0.75rem', gap: '4px' }}
+                title="Jump to correlated logs in Log Explorer"
+              >
+                <FileText size={12} />
+                <span>Correlated Logs</span>
+                <ArrowUpRight size={12} />
+              </Link>
+            </div>
           </div>
 
           {/* Waterfall Timeline */}
           <div style={{ marginBottom: '24px', backgroundColor: 'var(--bg-card)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '12px', display: 'flex', justifyContent: 'space-between' }}>
-              <span>Span Hierarchy ({relatedSpans.length} spans)</span>
-              <span>Total Duration: {Math.round(maxDuration / 1000000)}ms</span>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '14px', display: 'flex', justifyContent: 'space-between' }}>
+              <span>Span Execution Tree ({relatedSpans.length} spans)</span>
+              <span>Total Trace Duration: <strong>{Math.round(maxDuration / 1000000)}ms</strong></span>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
               {relatedSpans.map((rSpan) => {
                 const durationMs = Math.round(rSpan.durationNs / 1000000);
-                const widthPercent = Math.max((rSpan.durationNs / maxDuration) * 100, 8);
+                const widthPercent = Math.max((rSpan.durationNs / maxDuration) * 100, 6);
                 const isChild = rSpan.parentSpanId !== '';
+
+                const spanStartTimeMs = new Date(rSpan.startTime).getTime();
+                const totalTraceDurationMs = Math.max(maxDuration / 1000000, 1);
+                const offsetMs = Math.max(0, spanStartTimeMs - traceStartTimeMs);
+                const leftOffsetPercent = Math.min((offsetMs / totalTraceDurationMs) * 100, 85);
 
                 return (
                   <div key={rSpan.spanId} style={{ marginLeft: isChild ? '24px' : '0' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '4px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.78rem', marginBottom: '5px' }}>
                       <span style={{ fontWeight: 600, color: rSpan.statusCode === 'ERROR' ? '#f87171' : 'var(--text-primary)' }}>
                         {isChild && '↳ '} {rSpan.serviceName}: {rSpan.name}
                       </span>
@@ -177,14 +198,18 @@ export const TracesPage: React.FC = () => {
                       </span>
                     </div>
 
-                    <div style={{ height: '14px', width: '100%', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '4px', overflow: 'hidden' }}>
+                    {/* Timeline Track with Offset and Duration */}
+                    <div style={{ height: '16px', width: '100%', backgroundColor: 'rgba(255,255,255,0.04)', borderRadius: '4px', overflow: 'hidden', position: 'relative' }}>
                       <div
                         style={{
+                          position: 'relative',
+                          left: `${leftOffsetPercent}%`,
                           height: '100%',
                           width: `${widthPercent}%`,
                           backgroundColor: rSpan.statusCode === 'ERROR' ? '#ef4444' : '#10b981',
                           borderRadius: '4px',
-                          transition: 'width 0.3s ease',
+                          transition: 'all 0.3s ease',
+                          boxShadow: rSpan.statusCode === 'ERROR' ? '0 0 10px rgba(239, 68, 68, 0.4)' : 'none',
                         }}
                       />
                     </div>
@@ -196,8 +221,13 @@ export const TracesPage: React.FC = () => {
 
           {/* Span Details / Attributes */}
           <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
-            <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#fff', marginBottom: '10px' }}>
-              Span Attributes & Metadata
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+              <div style={{ fontWeight: 600, fontSize: '0.88rem', color: '#fff' }}>
+                Span Attributes & W3C Trace Context
+              </div>
+              <span className={`badge ${selectedSpan?.statusCode === 'ERROR' ? 'critical' : 'healthy'}`}>
+                {selectedSpan?.statusCode === 'ERROR' ? 'FAILED SPAN' : 'SUCCESS SPAN'}
+              </span>
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', fontSize: '0.8rem', marginBottom: '14px' }}>
@@ -206,12 +236,20 @@ export const TracesPage: React.FC = () => {
                 <span className="code-pill">{selectedSpan?.spanId}</span>
               </div>
               <div>
+                <span style={{ color: 'var(--text-muted)' }}>Parent Span ID:</span>{' '}
+                <span className="code-pill">{selectedSpan?.parentSpanId || 'None (Root Span)'}</span>
+              </div>
+              <div>
                 <span style={{ color: 'var(--text-muted)' }}>Kind:</span>{' '}
                 <span className="badge neutral">{selectedSpan?.kind}</span>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>HTTP Status:</span>{' '}
                 <span className="badge info">{selectedSpan?.httpStatusCode || 'N/A'}</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>Start Time:</span>{' '}
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.74rem' }}>{selectedSpan?.startTime}</span>
               </div>
               <div>
                 <span style={{ color: 'var(--text-muted)' }}>Status Message:</span>{' '}

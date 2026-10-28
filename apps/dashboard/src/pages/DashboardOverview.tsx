@@ -5,7 +5,8 @@ import { AnomaliesAlertBanner } from '../components/dashboard/AnomaliesAlertBann
 import { ServiceHealthTable } from '../components/dashboard/ServiceHealthTable';
 import { ThroughputChart } from '../components/dashboard/ThroughputChart';
 import { RecentActivityFeed } from '../components/dashboard/RecentActivityFeed';
-import { Terminal, ShieldCheck, Plus, Check, Layers } from 'lucide-react';
+import { Terminal, ShieldCheck, Plus, Check, Layers, CheckCircle2, ArrowDown } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 
 export const DashboardOverview: React.FC = () => {
@@ -13,17 +14,20 @@ export const DashboardOverview: React.FC = () => {
   const [showAddModal, setShowAddModal] = useState(false);
   const [customServiceName, setCustomServiceName] = useState('');
   const [justAdded, setJustAdded] = useState(false);
+  const [lastAddedServiceName, setLastAddedServiceName] = useState<string | null>(null);
 
   const handleAddService = (e: React.FormEvent) => {
     e.preventDefault();
     if (!customServiceName.trim()) return;
-    addCustomServiceTelemetry(customServiceName);
+    const name = customServiceName.trim();
+    addCustomServiceTelemetry(name);
     setJustAdded(true);
+    setLastAddedServiceName(name);
     setCustomServiceName('');
     setTimeout(() => {
       setJustAdded(false);
       setShowAddModal(false);
-    }, 1200);
+    }, 1000);
   };
 
   return (
@@ -120,6 +124,47 @@ export const DashboardOverview: React.FC = () => {
               <span>{justAdded ? 'Registered!' : 'Register Service'}</span>
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Registration Confirmation Banner */}
+      {lastAddedServiceName && (
+        <div
+          style={{
+            padding: '12px 18px',
+            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+            border: '1px solid var(--accent-emerald)',
+            borderRadius: '10px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            boxShadow: '0 0 15px rgba(16, 185, 129, 0.15)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <CheckCircle2 size={18} style={{ color: 'var(--accent-emerald)', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.85rem', color: '#fff' }}>
+              Service <strong style={{ color: 'var(--accent-emerald)' }}>"{lastAddedServiceName}"</strong> is now actively emitting OpenTelemetry data!
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => document.getElementById('service-red-table')?.scrollIntoView({ behavior: 'smooth' })}
+              className="btn-secondary"
+              style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+            >
+              <ArrowDown size={12} />
+              <span>Scroll to Table</span>
+            </button>
+            <Link
+              to="/logs"
+              className="btn-secondary"
+              style={{ padding: '4px 10px', fontSize: '0.74rem', textDecoration: 'none' }}
+            >
+              <span>View Logs ↗</span>
+            </Link>
+          </div>
         </div>
       )}
 
