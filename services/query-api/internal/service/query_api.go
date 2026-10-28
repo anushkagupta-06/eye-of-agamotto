@@ -20,6 +20,7 @@ type QueryAPI interface {
 	SearchLogs(ctx context.Context, tenantID string, query model.LogQuery) ([]*model.LogRecord, error)
 	TailLogs(ctx context.Context, tenantID string, filters model.LogTailFilters) (<-chan *model.LogRecord, error)
 	GetAnomalies(ctx context.Context, tenantID string, r model.AnomalyRange) ([]*model.Anomaly, error)
+	ExplainAnomaly(ctx context.Context, tenantID, anomalyID string) (*model.Anomaly, error)
 	GetTopology(ctx context.Context, tenantID string, from, to time.Time) (*model.TopologyGraph, error)
 }
 
@@ -441,6 +442,79 @@ func (s *queryAPIService) GetAnomalies(ctx context.Context, tenantID string, r m
 	}
 
 	return anomalies, nil
+}
+
+// ExplainAnomaly retrieves the root-cause diagnosis and evidence for a specific anomaly ID.
+func (s *queryAPIService) ExplainAnomaly(ctx context.Context, tenantID, anomalyID string) (*model.Anomaly, error) {
+	if tenantID == "" || anomalyID == "" {
+		return nil, fmt.Errorf("tenantID and anomalyID are required")
+	}
+
+	query := `
+		SELECT id, service_name, operation, metric, window_start, window_end,
+		       baseline_value, observed_value, z_score, root_cause_service, evidence, status
+		FROM observability.anomalies
+		WHERE tenant_id = ? AND id = ?
+		LIMIT 1
+	`
+
+	var (
+		idRaw            uuid.UUID
+		serviceName      string
+		operation        string
+		metric           string
+		windowStart      time.Time
+		windowEnd        time.Time
+		baselineVal      float64
+		observedVal      float64
+		zScore           float64
+		rootCauseService string
+		evidence         string
+		status           uint8
+	)
+
+	row := s.client.Conn().QueryRow(ctx, query, tenantID, anomalyID)
+	if err := row.Scan(
+		&idRaw, &serviceName, &operation, &metric, &windowStart, &windowEnd,
+		&baselineVal, &observedVal, &zScore, &rootCauseService, &evidence, &status,
+	); err != nil {
+		return nil, fmt.Errorf("explain anomaly %s: %w", anomalyID, err)
+	}
+
+	statusStr := "OPEN"
+	if status == 1 {
+		statusStr = "RESOLVED"
+	}
+
+	var relatedSpans []string
+	if evidence != "" {
+		var evMap map[string]any
+		if err := json.Unmarshal([]byte(evidence), &evMap); err == nil {
+			if spansList, ok := evMap["related_spans"].([]any); ok {
+				for _, item := range spansList {
+					if str, isStr := item.(string); isStr {
+						relatedSpans = append(relatedSpans, str)
+					}
+				}
+			}
+		}
+	}
+
+	return &model.Anomaly{
+		ID:                 idRaw.String(),
+		Service:            serviceName,
+		Operation:          operation,
+		Metric:             metric,
+		BaselineValue:      baselineVal,
+		ObservedValue:      observedVal,
+		ZScore:             zScore,
+		WindowStart:        windowStart,
+		WindowEnd:          windowEnd,
+		SuspectedRootCause: rootCauseService,
+		Evidence:           evidence,
+		RelatedSpans:       relatedSpans,
+		Status:             statusStr,
+	}, nil
 }
 
 // GetTopology constructs the active service dependency graph using rolled-up edge events.

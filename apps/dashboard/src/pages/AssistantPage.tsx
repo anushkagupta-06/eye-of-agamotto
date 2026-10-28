@@ -36,7 +36,14 @@ export const AssistantPage: React.FC = () => {
     {
       role: 'assistant',
       content: `Greetings! I am the **Eye of Agamotto AI Observability Assistant** powered by **Google ${GEMINI_MODEL}** via Model Context Protocol (MCP).\n\nI continuously monitor your OpenTelemetry spans, ClickHouse error logs, and RED metrics. Ask me about **any failing service**, and I will analyze the telemetry and provide **concrete code & architectural improvements** to resolve the root cause!`,
-      tools: ['mcp://gemini/analyze_telemetry', 'mcp://clickhouse/query_spans'],
+      tools: [
+        'mcp://telemetry/searchTraces',
+        'mcp://telemetry/getTrace',
+        'mcp://telemetry/queryLogs',
+        'mcp://telemetry/getServiceTopology',
+        'mcp://telemetry/listAnomalies',
+        'mcp://telemetry/explainAnomaly',
+      ],
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -72,9 +79,12 @@ export const AssistantPage: React.FC = () => {
         role: 'assistant',
         content: geminiResponse,
         tools: [
-          'mcp://gemini/root_cause_analysis',
-          'mcp://clickhouse/query_spans',
-          'mcp://stream_processor/explain_anomaly',
+          'mcp://telemetry/searchTraces',
+          'mcp://telemetry/getTrace',
+          'mcp://telemetry/queryLogs',
+          'mcp://telemetry/getServiceTopology',
+          'mcp://telemetry/listAnomalies',
+          'mcp://telemetry/explainAnomaly',
         ],
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
@@ -393,20 +403,35 @@ export const AssistantPage: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.76rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.76rem', maxHeight: '280px', overflowY: 'auto' }}>
               <div style={{ background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-                <strong style={{ color: 'var(--accent-emerald)' }}>analyze_telemetry</strong>
-                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>Extracts high-cardinality error logs and p99 spikes.</p>
+                <strong style={{ color: 'var(--accent-emerald)' }}>searchTraces</strong>
+                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>searchTraces(service, minDuration, status)</p>
               </div>
 
               <div style={{ background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-                <strong style={{ color: 'var(--accent-cyan)' }}>suggest_improvements</strong>
-                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>Generates circuit breakers, retry budgets, and async NATS patterns.</p>
+                <strong style={{ color: 'var(--accent-emerald)' }}>getTrace</strong>
+                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>getTrace(traceId) — DAG & critical path</p>
               </div>
 
               <div style={{ background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
-                <strong style={{ color: 'var(--accent-purple)' }}>explain_anomaly</strong>
-                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>Computes statistical z-score and root cause ranking.</p>
+                <strong style={{ color: 'var(--accent-cyan)' }}>queryLogs</strong>
+                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>queryLogs(query, range, service, severity)</p>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <strong style={{ color: 'var(--accent-cyan)' }}>getServiceTopology</strong>
+                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>getServiceTopology(range) — caller/callee graph</p>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <strong style={{ color: 'var(--accent-purple)' }}>listAnomalies</strong>
+                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>listAnomalies(range) — z-scores & deviations</p>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', padding: '8px 10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                <strong style={{ color: 'var(--accent-purple)' }}>explainAnomaly</strong>
+                <p style={{ color: 'var(--text-muted)', marginTop: '2px' }}>explainAnomaly(id) — root cause diagnosis</p>
               </div>
             </div>
           </div>

@@ -71,6 +71,16 @@ func (m *mockQueryAPI) GetAnomalies(ctx context.Context, tenantID string, r mode
 	}, nil
 }
 
+func (m *mockQueryAPI) ExplainAnomaly(ctx context.Context, tenantID, anomalyID string) (*model.Anomaly, error) {
+	return &model.Anomaly{
+		ID:                 anomalyID,
+		Service:            "checkout",
+		Metric:             "p99_latency",
+		ZScore:             4.2,
+		SuspectedRootCause: "payment-gateway",
+	}, nil
+}
+
 func (m *mockQueryAPI) GetTopology(ctx context.Context, tenantID string, from, to time.Time) (*model.TopologyGraph, error) {
 	return &model.TopologyGraph{
 		Services: []string{"gateway", "checkout"},

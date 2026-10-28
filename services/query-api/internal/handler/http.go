@@ -29,6 +29,7 @@ func (h *HTTPHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/traces", h.handleSearchTraces)
 	mux.HandleFunc("/api/v1/logs", h.handleSearchLogs)
 	mux.HandleFunc("/api/v1/logs/tail", h.handleTailLogs)
+	mux.HandleFunc("/api/v1/anomalies/", h.handleExplainAnomaly)
 	mux.HandleFunc("/api/v1/anomalies", h.handleGetAnomalies)
 	mux.HandleFunc("/api/v1/topology", h.handleGetTopology)
 }
@@ -210,6 +211,30 @@ func (h *HTTPHandler) handleGetAnomalies(w http.ResponseWriter, r *http.Request)
 		"data":  anomalies,
 		"count": len(anomalies),
 	})
+}
+
+// handleExplainAnomaly fetches the root-cause diagnosis for a specific anomaly ID.
+// GET /api/v1/anomalies/{id}
+func (h *HTTPHandler) handleExplainAnomaly(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[3] == "" {
+		http.Error(w, "anomaly id required in path", http.StatusBadRequest)
+		return
+	}
+	anomalyID := pathParts[3]
+
+	anomaly, err := h.svc.ExplainAnomaly(r.Context(), getTenant(r), anomalyID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, anomaly)
 }
 
 // handleGetTopology fetches the service dependency topology graph.
