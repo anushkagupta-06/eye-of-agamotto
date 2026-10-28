@@ -1,6 +1,10 @@
 import type { Anomaly, LogRecord, REDMetric, Span } from '../types/telemetry';
 
-export const GEMINI_API_KEY_DEFAULT = 'AQ.Ab8RN6K1KYsaTFxl53g97PeTIvp8oENp9XE_-lt4V0GvOJ54CA';
+export const GEMINI_API_KEY_DEFAULT: string =
+  (import.meta as any).env?.VITE_GEMINI_API_KEY ||
+  (import.meta as any).env?.GEMINI_API_KEY_DEFAULT 
+  '';
+
 export const GEMINI_MODEL = 'gemini-2.5-flash';
 
 export interface TelemetryContextPayload {

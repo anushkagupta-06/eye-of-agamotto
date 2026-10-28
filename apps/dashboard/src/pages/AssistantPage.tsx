@@ -121,16 +121,16 @@ export const AssistantPage: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              backgroundColor: 'rgba(16, 185, 129, 0.1)',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
+              backgroundColor: apiKey ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              border: `1px solid ${apiKey ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
               padding: '6px 12px',
               borderRadius: '8px',
               fontSize: '0.78rem',
-              color: 'var(--accent-emerald)',
+              color: apiKey ? 'var(--accent-emerald)' : 'var(--status-critical)',
             }}
           >
             <CheckCircle2 size={14} />
-            <span>Gemini Key Active</span>
+            <span>{apiKey ? 'Gemini Key Active (.env)' : 'Gemini Key Missing (.env)'}</span>
           </div>
         </div>
       </div>

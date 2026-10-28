@@ -14,6 +14,8 @@ import {
 import { Link } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 import type { Span } from '../types/telemetry';
+import { TraceFlamegraphD3 } from '../components/traces/TraceFlamegraphD3';
+import { TraceDAGView } from '../components/traces/TraceDAGView';
 
 // Deterministic vibrant color per microservice name (like Jaeger / Datadog)
 const SERVICE_COLOR_PALETTE: Record<string, string> = {
@@ -109,6 +111,7 @@ export const TracesPage: React.FC = () => {
 
   // Filter Trace List
   const [filterMode, setFilterMode] = useState<'ALL' | 'ERRORS'>('ALL');
+  const [viewMode, setViewMode] = useState<'FLAMEGRAPH' | 'DAG' | 'TABLE'>('FLAMEGRAPH');
 
   const visibleSummaries = useMemo(() => {
     if (filterMode === 'ERRORS') {
@@ -320,12 +323,12 @@ export const TracesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Full-Width Distributed Trace Flamegraph Canvas */}
+      {/* Main Full-Width Distributed Trace Canvas */}
       <div className="panel-card" style={{ padding: '0', overflow: 'hidden', marginBottom: '20px' }}>
-        {/* Flamegraph Top Header */}
+        {/* View Switcher Top Header */}
         <div
           style={{
-            padding: '14px 20px',
+            padding: '12px 20px',
             borderBottom: '1px solid var(--border-subtle)',
             backgroundColor: 'var(--bg-card)',
             display: 'flex',
@@ -339,7 +342,11 @@ export const TracesPage: React.FC = () => {
             <Layers size={18} style={{ color: 'var(--accent-emerald)' }} />
             <div>
               <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.9rem' }}>
-                Interactive Waterfall Timeline
+                {viewMode === 'FLAMEGRAPH'
+                  ? 'Interactive D3 Flamegraph'
+                  : viewMode === 'DAG'
+                  ? 'Trace Execution DAG Graph (Critical Path Highlighted)'
+                  : 'Hierarchical Span Table'}
               </span>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem', marginLeft: '10px' }}>
                 trace_id: <code style={{ color: 'var(--accent-cyan)' }}>{activeTraceId}</code>
@@ -347,180 +354,270 @@ export const TracesPage: React.FC = () => {
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '0.78rem' }}>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>Spans:</span>{' '}
-              <strong style={{ color: '#fff' }}>{activeTraceSpans.length}</strong>
-            </div>
-            <div>
-              <span style={{ color: 'var(--text-muted)' }}>Total Duration:</span>{' '}
-              <strong style={{ color: 'var(--accent-emerald)' }}>{traceStats.totalDurationMs}ms</strong>
-            </div>
-          </div>
-        </div>
-
-        {/* Horizontal Timeline Ruler / Scale */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '430px 1fr',
-            borderBottom: '1px solid var(--border-subtle)',
-            backgroundColor: 'rgba(255, 255, 255, 0.02)',
-            padding: '8px 20px',
-            fontSize: '0.72rem',
-            color: 'var(--text-muted)',
-            fontFamily: 'var(--font-mono)',
-          }}
-        >
-          <div>Spans, Parent-Child Tree & HTTP Status</div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: '8px', paddingRight: '8px' }}>
-            <span>0ms</span>
-            <span>{Math.round(traceStats.totalDurationMs * 0.25)}ms</span>
-            <span>{Math.round(traceStats.totalDurationMs * 0.5)}ms</span>
-            <span>{Math.round(traceStats.totalDurationMs * 0.75)}ms</span>
-            <span>{traceStats.totalDurationMs}ms</span>
-          </div>
-        </div>
-
-        {/* Flamegraph Waterfall Rows */}
-        <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
-          {spanTree.map(({ span, depth }) => {
-            const isSelected = selectedSpan?.spanId === span.spanId;
-            const isError = span.statusCode === 'ERROR';
-            const durationMs = Math.round(span.durationNs / 1000000);
-
-            // Compute precise start offset & duration width %
-            const spanStartTime = new Date(span.startTime).getTime();
-            const offsetMs = Math.max(0, spanStartTime - traceStats.minTime);
-            const totalMs = Math.max(traceStats.totalDurationMs, 1);
-            const leftPercent = Math.min((offsetMs / totalMs) * 100, 92);
-            const widthPercent = Math.max((durationMs / totalMs) * 100, 3);
-
-            const serviceColor = getServiceColor(span.serviceName, isError);
-
-            return (
-              <div
-                key={span.spanId}
-                onClick={() => setSelectedSpanId(span.spanId)}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+            {/* View Mode Toggle Switcher */}
+            <div
+              style={{
+                display: 'flex',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                borderRadius: '8px',
+                padding: '3px',
+                gap: '2px',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <button
+                type="button"
+                className={`btn-secondary ${viewMode === 'FLAMEGRAPH' ? 'active' : ''}`}
+                onClick={() => setViewMode('FLAMEGRAPH')}
                 style={{
-                  display: 'grid',
-                  gridTemplateColumns: '430px 1fr',
-                  padding: '9px 20px',
-                  borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
-                  backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
-                  borderLeft: isSelected ? '3px solid var(--accent-emerald)' : '3px solid transparent',
+                  padding: '4px 10px',
+                  fontSize: '0.72rem',
+                  border: 'none',
+                  borderRadius: '6px',
+                  backgroundColor: viewMode === 'FLAMEGRAPH' ? 'var(--accent-emerald)' : 'transparent',
+                  color: viewMode === 'FLAMEGRAPH' ? '#000' : 'var(--text-secondary)',
+                  fontWeight: viewMode === 'FLAMEGRAPH' ? 700 : 500,
                   cursor: 'pointer',
-                  transition: 'all 0.12s ease',
-                  alignItems: 'center',
                 }}
               >
-                {/* Left Column: Indented Tree Node + Parent-Child Indicators + HTTP Badge */}
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '7px',
-                    paddingLeft: `${depth * 20}px`,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {/* Parent-child depth marker */}
-                  {depth === 0 ? (
-                    <span className="badge neutral" style={{ fontSize: '0.62rem', padding: '1px 5px', fontWeight: 700 }}>
-                      ROOT
-                    </span>
-                  ) : (
-                    <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 600 }}>
-                      ↳
-                    </span>
-                  )}
+                🔥 D3 Flamegraph
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary ${viewMode === 'DAG' ? 'active' : ''}`}
+                onClick={() => setViewMode('DAG')}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: '0.72rem',
+                  border: 'none',
+                  borderRadius: '6px',
+                  backgroundColor: viewMode === 'DAG' ? '#f59e0b' : 'transparent',
+                  color: viewMode === 'DAG' ? '#000' : 'var(--text-secondary)',
+                  fontWeight: viewMode === 'DAG' ? 700 : 500,
+                  cursor: 'pointer',
+                }}
+              >
+                🕸️ Execution DAG
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary ${viewMode === 'TABLE' ? 'active' : ''}`}
+                onClick={() => setViewMode('TABLE')}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: '0.72rem',
+                  border: 'none',
+                  borderRadius: '6px',
+                  backgroundColor: viewMode === 'TABLE' ? 'var(--accent-cyan)' : 'transparent',
+                  color: viewMode === 'TABLE' ? '#000' : 'var(--text-secondary)',
+                  fontWeight: viewMode === 'TABLE' ? 700 : 500,
+                  cursor: 'pointer',
+                }}
+              >
+                📋 Table View
+              </button>
+            </div>
 
-                  {/* Microservice Chip */}
-                  <span
-                    style={{
-                      backgroundColor: `${serviceColor}20`,
-                      color: serviceColor,
-                      border: `1px solid ${serviceColor}50`,
-                      borderRadius: '4px',
-                      padding: '2px 6px',
-                      fontSize: '0.68rem',
-                      fontWeight: 600,
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {span.serviceName}
-                  </span>
-
-                  {/* Operation Name */}
-                  <span
-                    style={{
-                      fontSize: '0.78rem',
-                      color: isError ? '#f87171' : '#fff',
-                      fontWeight: isSelected ? 600 : 400,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      maxWidth: '150px',
-                    }}
-                    title={span.name}
-                  >
-                    {span.name}
-                  </span>
-
-                  {/* HTTP Status Code Badge */}
-                  {renderHttpBadge(span.httpStatusCode, span.statusCode)}
-
-                  {/* Execution Duration Pill */}
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
-                    {durationMs}ms
-                  </span>
-                </div>
-
-                {/* Right Column: Interactive Flamegraph Bar */}
-                <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
-                  {/* Grid Vertical Guide Lines */}
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'space-between', opacity: 0.15, pointerEvents: 'none' }}>
-                    <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
-                    <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
-                    <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
-                    <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
-                    <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
-                  </div>
-
-                  {/* The Actual Flamegraph Bar */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: `${leftPercent}%`,
-                      width: `${widthPercent}%`,
-                      height: '18px',
-                      backgroundColor: serviceColor,
-                      borderRadius: '4px',
-                      boxShadow: isSelected
-                        ? `0 0 12px ${serviceColor}`
-                        : isError
-                        ? '0 0 10px rgba(239, 68, 68, 0.4)'
-                        : 'none',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0 6px',
-                      color: '#000',
-                      fontSize: '0.68rem',
-                      fontWeight: 700,
-                      transition: 'all 0.2s ease',
-                    }}
-                    title={`${span.serviceName}: ${span.name} (${durationMs}ms) [HTTP ${span.httpStatusCode || span.statusCode}]`}
-                  >
-                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {durationMs}ms
-                    </span>
-                  </div>
-                </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '14px', fontSize: '0.78rem' }}>
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>Spans:</span>{' '}
+                <strong style={{ color: '#fff' }}>{activeTraceSpans.length}</strong>
               </div>
-            );
-          })}
+              <div>
+                <span style={{ color: 'var(--text-muted)' }}>Total Duration:</span>{' '}
+                <strong style={{ color: 'var(--accent-emerald)' }}>{traceStats.totalDurationMs}ms</strong>
+              </div>
+            </div>
+          </div>
         </div>
+
+        {/* Dynamic View Body */}
+        {viewMode === 'FLAMEGRAPH' && (
+          <TraceFlamegraphD3
+            spans={activeTraceSpans}
+            selectedSpanId={selectedSpanId}
+            onSelectSpan={(span) => setSelectedSpanId(span.spanId)}
+            serviceColors={SERVICE_COLOR_PALETTE}
+            getServiceColor={getServiceColor}
+          />
+        )}
+
+        {viewMode === 'DAG' && (
+          <TraceDAGView
+            spans={activeTraceSpans}
+            selectedSpanId={selectedSpanId}
+            onSelectSpan={(span) => setSelectedSpanId(span.spanId)}
+            getServiceColor={getServiceColor}
+          />
+        )}
+
+        {viewMode === 'TABLE' && (
+          <div>
+            {/* Horizontal Timeline Ruler / Scale */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: '430px 1fr',
+                borderBottom: '1px solid var(--border-subtle)',
+                backgroundColor: 'rgba(255, 255, 255, 0.02)',
+                padding: '8px 20px',
+                fontSize: '0.72rem',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+              }}
+            >
+              <div>Spans, Parent-Child Tree & HTTP Status</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', paddingLeft: '8px', paddingRight: '8px' }}>
+                <span>0ms</span>
+                <span>{Math.round(traceStats.totalDurationMs * 0.25)}ms</span>
+                <span>{Math.round(traceStats.totalDurationMs * 0.5)}ms</span>
+                <span>{Math.round(traceStats.totalDurationMs * 0.75)}ms</span>
+                <span>{traceStats.totalDurationMs}ms</span>
+              </div>
+            </div>
+
+            {/* Flamegraph Waterfall Rows */}
+            <div style={{ maxHeight: '520px', overflowY: 'auto' }}>
+              {spanTree.map(({ span, depth }) => {
+                const isSelected = selectedSpan?.spanId === span.spanId;
+                const isError = span.statusCode === 'ERROR';
+                const durationMs = Math.round(span.durationNs / 1000000);
+
+                // Compute precise start offset & duration width %
+                const spanStartTime = new Date(span.startTime).getTime();
+                const offsetMs = Math.max(0, spanStartTime - traceStats.minTime);
+                const totalMs = Math.max(traceStats.totalDurationMs, 1);
+                const leftPercent = Math.min((offsetMs / totalMs) * 100, 92);
+                const widthPercent = Math.max((durationMs / totalMs) * 100, 3);
+
+                const serviceColor = getServiceColor(span.serviceName, isError);
+
+                return (
+                  <div
+                    key={span.spanId}
+                    onClick={() => setSelectedSpanId(span.spanId)}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '430px 1fr',
+                      padding: '9px 20px',
+                      borderBottom: '1px solid rgba(255, 255, 255, 0.04)',
+                      backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
+                      borderLeft: isSelected ? '3px solid var(--accent-emerald)' : '3px solid transparent',
+                      cursor: 'pointer',
+                      transition: 'all 0.12s ease',
+                      alignItems: 'center',
+                    }}
+                  >
+                    {/* Left Column: Indented Tree Node + Parent-Child Indicators + HTTP Badge */}
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '7px',
+                        paddingLeft: `${depth * 20}px`,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {/* Parent-child depth marker */}
+                      {depth === 0 ? (
+                        <span className="badge neutral" style={{ fontSize: '0.62rem', padding: '1px 5px', fontWeight: 700 }}>
+                          ROOT
+                        </span>
+                      ) : (
+                        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: '0.75rem', fontWeight: 600 }}>
+                          ↳
+                        </span>
+                      )}
+
+                      {/* Microservice Chip */}
+                      <span
+                        style={{
+                          backgroundColor: `${serviceColor}20`,
+                          color: serviceColor,
+                          border: `1px solid ${serviceColor}50`,
+                          borderRadius: '4px',
+                          padding: '2px 6px',
+                          fontSize: '0.68rem',
+                          fontWeight: 600,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {span.serviceName}
+                      </span>
+
+                      {/* Operation Name */}
+                      <span
+                        style={{
+                          fontSize: '0.78rem',
+                          color: isError ? '#f87171' : '#fff',
+                          fontWeight: isSelected ? 600 : 400,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          maxWidth: '150px',
+                        }}
+                        title={span.name}
+                      >
+                        {span.name}
+                      </span>
+
+                      {/* HTTP Status Code Badge */}
+                      {renderHttpBadge(span.httpStatusCode, span.statusCode)}
+
+                      {/* Execution Duration Pill */}
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                        {durationMs}ms
+                      </span>
+                    </div>
+
+                    {/* Right Column: Interactive Flamegraph Bar */}
+                    <div style={{ position: 'relative', height: '24px', display: 'flex', alignItems: 'center' }}>
+                      {/* Grid Vertical Guide Lines */}
+                      <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'space-between', opacity: 0.15, pointerEvents: 'none' }}>
+                        <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
+                        <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
+                        <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
+                        <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
+                        <div style={{ borderLeft: '1px dashed #fff', height: '100%' }} />
+                      </div>
+
+                      {/* The Actual Flamegraph Bar */}
+                      <div
+                        style={{
+                          position: 'absolute',
+                          left: `${leftPercent}%`,
+                          width: `${widthPercent}%`,
+                          height: '18px',
+                          backgroundColor: serviceColor,
+                          borderRadius: '4px',
+                          boxShadow: isSelected
+                            ? `0 0 12px ${serviceColor}`
+                            : isError
+                            ? '0 0 10px rgba(239, 68, 68, 0.4)'
+                            : 'none',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '0 6px',
+                          color: '#000',
+                          fontSize: '0.68rem',
+                          fontWeight: 700,
+                          transition: 'all 0.2s ease',
+                        }}
+                        title={`${span.serviceName}: ${span.name} (${durationMs}ms) [HTTP ${span.httpStatusCode || span.statusCode}]`}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {durationMs}ms
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Selected Span Details Inspector */}
