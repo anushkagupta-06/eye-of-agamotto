@@ -1,0 +1,20 @@
+{
+  "$schema": "https://modelcontextprotocol.io/schema/config.json",
+  "mcpServers": {
+    "eye-of-agamotto": {
+      "command": "go",
+      "args": [
+        "run",
+        "./services/mcp-server/cmd/mcp-server",
+        "-stdio",
+        "-query-api",
+        "http://127.0.0.1:8082",
+        "-tenant",
+        "demo"
+      ],
+      "env": {
+        "CH_DATABASE": "observability"
+      }
+    }
+  }
+}

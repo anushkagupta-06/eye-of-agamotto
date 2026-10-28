@@ -7,7 +7,19 @@ export interface MCPToolCallResult {
 }
 
 export const MCP_SERVER_URL =
-  (import.meta as any).env?.VITE_MCP_SERVER_URL || 'http://127.0.0.1:8083';
+  (import.meta as any).env?.VITE_MCP_SERVER_URL || '/api/mcp';
+
+/**
+ * Health check to verify if the Eye of Agamotto MCP server is reachable.
+ */
+export async function checkMCPHealth(): Promise<boolean> {
+  try {
+    const res = await fetch(`${MCP_SERVER_URL}/healthz`, { method: 'GET' });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Invoke an MCP tool using standard JSON-RPC 2.0 over HTTP.

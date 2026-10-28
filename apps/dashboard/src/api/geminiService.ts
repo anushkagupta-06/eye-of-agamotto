@@ -1,4 +1,5 @@
 import type { Anomaly, LogRecord, REDMetric, Span } from '../types/telemetry';
+import { callMCPTool } from './mcpClient';
 
 export const GEMINI_API_KEY_DEFAULT: string =
   (import.meta as any).env?.VITE_GEMINI_API_KEY ||
@@ -106,8 +107,78 @@ Cite the exact service names, numbers, and observed latencies from the telemetry
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
 
-  // Using official Gemini 2.5 system_instruction format
-  const requestBody = {
+  const mcpToolsDeclaration = [
+    {
+      function_declarations: [
+        {
+          name: 'searchTraces',
+          description: 'Search distributed traces and spans in ClickHouse filtered by service, minDuration, or status (ERROR/OK).',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              service: { type: 'STRING', description: 'Microservice name' },
+              status: { type: 'STRING', description: 'ERROR or OK' },
+              limit: { type: 'NUMBER', description: 'Maximum traces to return' },
+            },
+          },
+        },
+        {
+          name: 'getTrace',
+          description: 'Retrieve the complete distributed trace DAG for a specific traceId.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              traceId: { type: 'STRING', description: '32-character hexadecimal trace identifier' },
+            },
+            required: ['traceId'],
+          },
+        },
+        {
+          name: 'queryLogs',
+          description: 'Search indexed ClickHouse logs using token full-text search, service filter, or severity.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              query: { type: 'STRING', description: 'Search token in log body' },
+              service: { type: 'STRING', description: 'Service name filter' },
+              severity: { type: 'STRING', description: 'ERROR, WARN, INFO' },
+              traceId: { type: 'STRING', description: 'Filter logs by traceId' },
+            },
+          },
+        },
+        {
+          name: 'getServiceTopology',
+          description: 'Retrieve the live directed service dependency topology map with RED metrics.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {},
+          },
+        },
+        {
+          name: 'listAnomalies',
+          description: 'List active statistical anomalies and latency spikes.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {},
+          },
+        },
+        {
+          name: 'explainAnomaly',
+          description: 'Deep-dive analysis of an anomaly and candidate root-cause spans.',
+          parameters: {
+            type: 'OBJECT',
+            properties: {
+              anomalyId: { type: 'STRING', description: 'Anomaly identifier' },
+            },
+            required: ['anomalyId'],
+          },
+        },
+      ],
+    },
+  ];
+
+  // Using official Gemini 2.5 system_instruction format with MCP tools
+  const requestBody: any = {
     system_instruction: {
       parts: [{ text: systemInstruction }],
     },
@@ -121,6 +192,7 @@ Cite the exact service names, numbers, and observed latencies from the telemetry
         ],
       },
     ],
+    tools: mcpToolsDeclaration,
     generationConfig: {
       temperature: 0.15,
       maxOutputTokens: 2048,
@@ -142,7 +214,67 @@ Cite the exact service names, numbers, and observed latencies from the telemetry
     }
 
     const data = await response.json();
-    const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidateParts = data?.candidates?.[0]?.content?.parts;
+
+    // Check if Gemini invoked an MCP tool
+    const functionCallPart = candidateParts?.find((p: any) => p.functionCall);
+    if (functionCallPart?.functionCall) {
+      const { name, args } = functionCallPart.functionCall;
+      console.log(`[MCP] Gemini called tool '${name}':`, args);
+
+      try {
+        const toolResult = await callMCPTool(name, args || {});
+        console.log(`[MCP] Tool result received for '${name}':`, toolResult);
+
+        // Send function response back to Gemini to complete the tool execution loop
+        const followUpBody = {
+          system_instruction: {
+            parts: [{ text: systemInstruction }],
+          },
+          contents: [
+            ...requestBody.contents,
+            {
+              role: 'model',
+              parts: [{ functionCall: functionCallPart.functionCall }],
+            },
+            {
+              role: 'user',
+              parts: [
+                {
+                  functionResponse: {
+                    name,
+                    response: { output: toolResult },
+                  },
+                },
+              ],
+            },
+          ],
+          tools: mcpToolsDeclaration,
+          generationConfig: {
+            temperature: 0.15,
+            maxOutputTokens: 2048,
+          },
+        };
+
+        const followUpResp = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(followUpBody),
+        });
+
+        if (followUpResp.ok) {
+          const followUpData = await followUpResp.json();
+          const finalCandidateText = followUpData?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (finalCandidateText) {
+            return `> ⚡ **Executed MCP Tool:** \`${name}\`\n\n${finalCandidateText}`;
+          }
+        }
+      } catch (mcpErr) {
+        console.warn(`[MCP] Tool call '${name}' failed, falling back to direct context:`, mcpErr);
+      }
+    }
+
+    const candidateText = candidateParts?.[0]?.text;
     if (candidateText) {
       return candidateText;
     }

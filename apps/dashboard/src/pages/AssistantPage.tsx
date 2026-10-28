@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Bot,
   Send,
@@ -9,10 +9,13 @@ import {
   Wrench,
   CheckCircle2,
   RefreshCw,
-  Lightbulb
+  Lightbulb,
+  Radio,
+  Terminal
 } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
 import { askGeminiAssistant, GEMINI_API_KEY_DEFAULT, GEMINI_MODEL } from '../api/geminiService';
+import { checkMCPHealth, callMCPTool } from '../api/mcpClient';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -31,6 +34,23 @@ export const AssistantPage: React.FC = () => {
 
   const [isLoading, setIsLoading] = useState(false);
   const [inputVal, setInputVal] = useState('');
+  const [mcpConnected, setMcpConnected] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    checkMCPHealth().then((healthy) => {
+      if (mounted) setMcpConnected(healthy);
+    });
+    const interval = setInterval(() => {
+      checkMCPHealth().then((healthy) => {
+        if (mounted) setMcpConnected(healthy);
+      });
+    }, 10000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -104,6 +124,47 @@ export const AssistantPage: React.FC = () => {
     }
   };
 
+  const executeDirectMCPTool = async (toolName: string, args: Record<string, any>, label: string) => {
+    if (isLoading) return;
+    const toolCallMsg: ChatMessage = {
+      role: 'user',
+      content: `⚡ **Invoked MCP Tool:** \`${toolName}\` (${label})`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+    setMessages((prev) => [...prev, toolCallMsg]);
+    setIsLoading(true);
+
+    try {
+      const result = await callMCPTool(toolName, args);
+      const formatted = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+
+      const geminiAnalysis = await askGeminiAssistant(
+        `Here is the raw telemetry output from MCP tool '${toolName}':\n\`\`\`json\n${formatted.slice(0, 1500)}\n\`\`\`\nPlease analyze this live data and provide root-cause insights and architectural solutions.`,
+        { tenant, systemProfileName, redMetrics, anomalies, spans, logs },
+        apiKey
+      );
+
+      const assistantMsg: ChatMessage = {
+        role: 'assistant',
+        content: `### ⚡ MCP Tool Output: \`${toolName}\`\n\`\`\`json\n${formatted.slice(0, 800)}${formatted.length > 800 ? '\n... (truncated)' : ''}\n\`\`\`\n\n${geminiAnalysis}`,
+        tools: [`mcp://telemetry/${toolName}`],
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'assistant',
+          content: `⚠️ MCP Tool \`${toolName}\` call failed: ${err.message || 'Server unreachable on port 8083'}. Ensure \`go run ./services/mcp-server/cmd/mcp-server\` is running.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const quickPrompts = [
     'Analyze the current failing services and provide step-by-step code and architectural improvements to fix them.',
     'Why is the P99 latency spiking, and how can we prevent cascading timeouts to upstream gateways?',
@@ -126,6 +187,23 @@ export const AssistantPage: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: mcpConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(234, 179, 8, 0.1)',
+              border: `1px solid ${mcpConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(234, 179, 8, 0.3)'}`,
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '0.78rem',
+              color: mcpConnected ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+            }}
+          >
+            <Radio size={14} className={mcpConnected ? 'pulse-fast' : ''} />
+            <span>{mcpConnected ? 'MCP Server: Live (:8083)' : 'MCP Server: Standby'}</span>
+          </div>
+
           <div
             style={{
               display: 'flex',
@@ -187,6 +265,77 @@ export const AssistantPage: React.FC = () => {
                 <span>{q.slice(0, 48)}...</span>
               </button>
             ))}
+          </div>
+
+          {/* Quick MCP Tool Action Bar */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 0', borderBottom: '1px solid var(--border-subtle)', overflowX: 'auto' }}>
+            <span style={{ fontSize: '0.68rem', color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 600, marginRight: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Terminal size={12} style={{ color: 'var(--accent-emerald)' }} /> MCP Tools:
+            </span>
+            <button
+              onClick={() => executeDirectMCPTool('searchTraces', { status: 'ERROR', limit: 10 }, 'Failing Spans')}
+              disabled={isLoading}
+              style={{
+                background: 'rgba(239, 68, 68, 0.08)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '6px',
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                color: 'var(--status-critical)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🔍 searchTraces(ERROR)
+            </button>
+            <button
+              onClick={() => executeDirectMCPTool('getServiceTopology', {}, 'Dependency Graph')}
+              disabled={isLoading}
+              style={{
+                background: 'rgba(99, 102, 241, 0.08)',
+                border: '1px solid rgba(99, 102, 241, 0.25)',
+                borderRadius: '6px',
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                color: 'var(--accent-primary)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              🗺️ getServiceTopology
+            </button>
+            <button
+              onClick={() => executeDirectMCPTool('queryLogs', { severity: 'ERROR' }, 'Error Logs')}
+              disabled={isLoading}
+              style={{
+                background: 'rgba(234, 179, 8, 0.08)',
+                border: '1px solid rgba(234, 179, 8, 0.25)',
+                borderRadius: '6px',
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                color: 'var(--accent-amber)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              📋 queryLogs(ERROR)
+            </button>
+            <button
+              onClick={() => executeDirectMCPTool('listAnomalies', {}, 'Active Anomalies')}
+              disabled={isLoading}
+              style={{
+                background: 'rgba(168, 85, 247, 0.08)',
+                border: '1px solid rgba(168, 85, 247, 0.25)',
+                borderRadius: '6px',
+                padding: '3px 8px',
+                fontSize: '0.72rem',
+                color: '#c084fc',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              ⚠️ listAnomalies
+            </button>
           </div>
 
           {/* Messages Stream */}
