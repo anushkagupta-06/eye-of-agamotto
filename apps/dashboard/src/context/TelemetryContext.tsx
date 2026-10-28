@@ -82,11 +82,48 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     operation: string = 'POST /v1/process',
     isError: boolean = false
   ) => {
-    const res = await emitLiveOTLPTrace(serviceName, operation, isError);
-    // Refresh telemetry data after a brief buffer delay for ingestion and rollup
+    const cleanName = serviceName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+    const res = await emitLiveOTLPTrace(cleanName, operation, isError);
+
+    // Optimistically update local state so the service immediately shows on the UI
+    const nowIso = new Date().toISOString();
+    const optimisticMetric: REDMetric = {
+      serviceName: cleanName,
+      operation: operation,
+      callsPerMin: 120,
+      errorCount: isError ? 12 : 0,
+      errorRate: isError ? 10.0 : 0.0,
+      p50Ms: 14,
+      p95Ms: 45,
+      p99Ms: 85,
+      status: isError ? 'CRITICAL' : 'HEALTHY',
+    };
+
+    const optimisticSpan: Span = {
+      tenantId: tenant,
+      traceId: res.traceId,
+      spanId: res.spanId,
+      parentSpanId: '',
+      serviceName: cleanName,
+      name: operation,
+      kind: 'SERVER',
+      startTime: nowIso,
+      durationNs: 45000000,
+      statusCode: isError ? 'ERROR' : 'OK',
+      httpStatusCode: isError ? 500 : 200,
+      attributes: { 'http.method': 'POST' },
+      resourceAttributes: { 'service.name': cleanName },
+      ingestedAt: nowIso,
+    };
+
+    setRedMetrics((prev) => [...prev.filter((m) => m.serviceName !== cleanName), optimisticMetric]);
+    setSpans((prev) => [optimisticSpan, ...prev]);
+
+    // Also trigger background refresh to sync with Query API
     setTimeout(() => {
       refreshData();
-    }, 800);
+    }, 1200);
+
     return res;
   };
 

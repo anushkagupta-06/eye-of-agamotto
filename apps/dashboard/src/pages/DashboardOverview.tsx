@@ -15,6 +15,7 @@ export const DashboardOverview: React.FC = () => {
   const [customServiceName, setCustomServiceName] = useState('');
   const [justAdded, setJustAdded] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [emitError, setEmitError] = useState<string | null>(null);
   const [lastAddedServiceName, setLastAddedServiceName] = useState<string | null>(null);
 
   const handleAddService = async (e: React.FormEvent) => {
@@ -22,6 +23,7 @@ export const DashboardOverview: React.FC = () => {
     if (!customServiceName.trim() || isSubmitting) return;
     const name = customServiceName.trim();
     setIsSubmitting(true);
+    setEmitError(null);
     try {
       await emitRealServiceTrace(name);
       setJustAdded(true);
@@ -30,9 +32,10 @@ export const DashboardOverview: React.FC = () => {
       setTimeout(() => {
         setJustAdded(false);
         setShowAddModal(false);
-      }, 1200);
-    } catch (err) {
+      }, 1500);
+    } catch (err: any) {
       console.error('Failed to emit live trace:', err);
+      setEmitError(err?.message || 'Failed to emit trace to gateway');
     } finally {
       setIsSubmitting(false);
     }
@@ -120,6 +123,11 @@ export const DashboardOverview: React.FC = () => {
               <span>{justAdded ? 'Trace Ingested!' : isSubmitting ? 'Ingesting...' : 'Emit Real Trace'}</span>
             </button>
           </form>
+          {emitError && (
+            <div style={{ marginTop: '10px', fontSize: '0.78rem', color: '#f87171' }}>
+              ⚠️ {emitError}
+            </div>
+          )}
         </div>
       )}
 

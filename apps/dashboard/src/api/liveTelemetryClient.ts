@@ -273,7 +273,8 @@ export async function emitLiveOTLPTrace(
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'X-EOA-API-Key': DEFAULT_API_KEY,
+      'X-API-Key': DEFAULT_API_KEY,
+      'Authorization': `Bearer ${DEFAULT_API_KEY}`,
     },
     body: JSON.stringify(otlpPayload),
   });
