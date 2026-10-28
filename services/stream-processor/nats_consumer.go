@@ -21,6 +21,7 @@ type TraceConsumer struct {
 	nc       *nats.Conn
 	consumer jetstream.Consumer
 	store    EdgeEventStore
+	dedup    jetstream.KeyValue
 }
 
 func NewTraceConsumer(ctx context.Context, store EdgeEventStore) (*TraceConsumer, error) {
@@ -57,6 +58,11 @@ func NewTraceConsumer(ctx context.Context, store EdgeEventStore) (*TraceConsumer
 		nc.Close()
 		return nil, fmt.Errorf("find JetStream stream %q: %w", stream, err)
 	}
+	dedup, err := openDedupStore(ctx, js)
+	if err != nil {
+		nc.Close()
+		return nil, err
+	}
 
 	consumer, err := js.CreateOrUpdateConsumer(ctx, stream, jetstream.ConsumerConfig{
 		Durable:       processorDurable,
@@ -77,6 +83,7 @@ func NewTraceConsumer(ctx context.Context, store EdgeEventStore) (*TraceConsumer
 		nc:       nc,
 		consumer: consumer,
 		store:    store,
+		dedup:    dedup,
 	}, nil
 }
 
@@ -125,6 +132,29 @@ func (c *TraceConsumer) processMessage(ctx context.Context, msg jetstream.Msg) e
 		return err
 	}
 
+	// A stream sequence remains the same when JetStream redelivers
+	// the same stored message.
+	meta, err := msg.Metadata()
+	if err != nil {
+		return fmt.Errorf("read NATS message metadata: %w", err)
+	}
+
+	key := fmt.Sprintf("trace-%d", meta.Sequence.Stream)
+
+	// If this message was already persisted and marked, don't insert it again.
+	_, err = c.dedup.Get(ctx, key)
+	if err == nil {
+		log.Printf(
+			"Skipping previously processed trace message: stream=%s sequence=%d",
+			meta.Stream,
+			meta.Sequence.Stream,
+		)
+		return nil
+	}
+	if err != jetstream.ErrKeyNotFound {
+		return fmt.Errorf("check deduplication marker %q: %w", key, err)
+	}
+
 	tenantID := msg.Headers().Get(tenantHeader)
 	if tenantID == "" {
 		return fmt.Errorf("message is missing %s header", tenantHeader)
@@ -141,9 +171,16 @@ func (c *TraceConsumer) processMessage(ctx context.Context, msg jetstream.Msg) e
 		return fmt.Errorf("persist %d edge events: %w", len(edges), err)
 	}
 
+	// Save the marker only after the ClickHouse insert succeeds.
+	// The consumer ACK happens after this method returns.
+	if _, err := c.dedup.Put(ctx, key, []byte("processed")); err != nil {
+		return fmt.Errorf("save deduplication marker %q: %w", key, err)
+	}
+
 	log.Printf(
-		"Processed trace message: tenant=%s spans=%d edge_events=%d",
+		"Processed trace message: tenant=%s sequence=%d spans=%d edge_events=%d",
 		tenantID,
+		meta.Sequence.Stream,
 		len(spans),
 		len(edges),
 	)

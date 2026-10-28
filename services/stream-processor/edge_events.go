@@ -46,7 +46,11 @@ func ExtractEdgeEvents(tenantID string, spans []SpanEvent) []EdgeEvent {
 		}
 
 		var isError uint8
-		if child.HTTPStatusCode >= 500 && child.HTTPStatusCode <= 599 {
+
+		// Mark the edge as failed if the child span has an OTLP ERROR status
+		// or an HTTP 5xx response.
+		if child.OTelStatusCode == 2 ||
+			(child.HTTPStatusCode >= 500 && child.HTTPStatusCode <= 599) {
 			isError = 1
 		}
 

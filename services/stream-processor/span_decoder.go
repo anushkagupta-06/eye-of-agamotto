@@ -23,6 +23,7 @@ type SpanEvent struct {
 	EndTime        time.Time
 	DurationNs     int64
 	HTTPStatusCode int
+	OTelStatusCode int32
 }
 
 // DecodeOTLPTraces converts an OTLP protobuf message into SpanEvents.
@@ -60,6 +61,7 @@ func DecodeOTLPTraces(data []byte) ([]SpanEvent, error) {
 					EndTime:        time.Unix(0, int64(endNs)).UTC(),
 					DurationNs:     durationNs,
 					HTTPStatusCode: getHTTPStatusCode(span.GetAttributes()),
+					OTelStatusCode: int32(span.GetStatus().GetCode()),
 				})
 			}
 		}
@@ -112,7 +114,6 @@ func getHTTPStatusCode(attributes []*commonv1.KeyValue) int {
 			}
 
 			value := attr.GetValue()
-
 			if value == nil {
 				continue
 			}

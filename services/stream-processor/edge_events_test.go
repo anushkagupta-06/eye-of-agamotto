@@ -62,3 +62,38 @@ func TestExtractEdgeEventsSkipsMissingParentAndEmptyTenant(t *testing.T) {
 		t.Fatalf("expected no events for empty tenant, got %+v", got)
 	}
 }
+
+func TestExtractEdgeEventsMarksOTelError(t *testing.T) {
+	start := time.Date(2026, 10, 28, 10, 0, 0, 0, time.UTC)
+
+	spans := []SpanEvent{
+		{
+			Service:    "order-service",
+			TraceID:    "trace-otel-error",
+			SpanID:     "client-span",
+			SpanKind:   "SPAN_KIND_CLIENT",
+			StartTime:  start,
+			DurationNs: 250_000_000,
+		},
+		{
+			Service:        "payment-service",
+			TraceID:        "trace-otel-error",
+			SpanID:         "server-span",
+			ParentSpanID:   "client-span",
+			SpanKind:       "SPAN_KIND_SERVER",
+			StartTime:      start,
+			DurationNs:     250_000_000,
+			OTelStatusCode: 2,
+		},
+	}
+
+	got := ExtractEdgeEvents("tenant-a", spans)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 edge event, got %d", len(got))
+	}
+
+	if got[0].IsError != 1 {
+		t.Fatalf("expected OTLP ERROR status to mark edge as error, got %+v", got[0])
+	}
+}
