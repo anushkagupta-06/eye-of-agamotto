@@ -12,6 +12,7 @@ import (
 
 type EdgeEventStore interface {
 	InsertEdges(ctx context.Context, edges []EdgeEvent) error
+	InsertAnomaly(ctx context.Context, anom AnomalyEvent) error
 	Close() error
 }
 
@@ -93,6 +94,43 @@ func (s *ClickHouseEdgeStore) InsertEdges(ctx context.Context, edges []EdgeEvent
 	}
 
 	return nil
+}
+
+func (s *ClickHouseEdgeStore) InsertAnomaly(ctx context.Context, anom AnomalyEvent) error {
+	batch, err := s.conn.PrepareBatch(ctx, `
+		INSERT INTO observability.anomalies
+			(tenant_id, id, service_name, operation, metric, window_start, window_end,
+			 baseline_value, observed_value, z_score, root_cause_service, evidence, status, updated_at)
+	`)
+	if err != nil {
+		return fmt.Errorf("prepare anomalies insert: %w", err)
+	}
+
+	statusStr := "OPEN"
+	if anom.Status == "RESOLVED" {
+		statusStr = "RESOLVED"
+	}
+
+	if err := batch.Append(
+		anom.TenantID,
+		anom.ID,
+		anom.ServiceName,
+		anom.Operation,
+		anom.Metric,
+		anom.WindowStart,
+		anom.WindowEnd,
+		anom.BaselineValue,
+		anom.ObservedValue,
+		anom.ZScore,
+		anom.RootCauseService,
+		anom.Evidence,
+		statusStr,
+		anom.UpdatedAt,
+	); err != nil {
+		return fmt.Errorf("append anomaly: %w", err)
+	}
+
+	return batch.Send()
 }
 
 func (s *ClickHouseEdgeStore) Close() error {

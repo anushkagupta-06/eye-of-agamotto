@@ -77,7 +77,7 @@ Modern production software architectures are split across ephemeral microservice
 | **Service Dependency Topology Map** | **Completed** | Directed DAG visualization via `@xyflow/react` with real-time error colors and latency tags in [`TopologyPage.tsx`](file:///apps/dashboard/src/pages/TopologyPage.tsx). |
 | **Log Explorer with Trace Correlation** | **Completed** | Full-text, regex, level, and span/trace-id filters with 1-click drill-down in [`LogsPage.tsx`](file:///apps/dashboard/src/pages/LogsPage.tsx). |
 | **Model Context Protocol (MCP) Server** | **Completed** | 6 standard tools (`search_traces`, `get_trace`, `query_logs`, `get_service_topology`, `list_anomalies`, `explain_anomaly`) over stdio and SSE in [`services/mcp-server`](file:///services/mcp-server/). |
-| **Automated Root-Cause Correlation (Continuous Daemon)** | **Partially Done / Roadmap** | Schema and Z-score calculation implemented; continuous streaming anomaly daemon scheduled for roadmap. |
+| **Automated Root-Cause Correlation (Continuous Daemon)** | **Completed** | Continuous streaming anomaly detection ($Z$-score $\ge 3.0$), root-cause attribution, and lifecycle tracking (`OPEN`/`RESOLVED`) in [`services/stream-processor`](file:///services/stream-processor/). |
 | **Built-in 5-Microservice Demo Workload & Fault Injector** | **Roadmap** | Benchmark script (`smoke-ingest.sh`) exists; containerized multi-service mock cluster + k6 chaos injector in roadmap. |
 | **Virtualized Infinite Scroll (100k+ rows)** | **Roadmap** | TanStack Virtual installed in `package.json`; currently utilizes server-side pagination with real-time SSE. |
 | **Multi-Tenant User Login & RBAC UI** | **Roadmap** | Simulated dev auth currently active; OIDC/JWT login UI deferred to production deployment roadmap. |
@@ -99,8 +99,9 @@ Modern production software architectures are split across ephemeral microservice
 
 ### 3. Stream Processor (`services/stream-processor`)
 - Concurrently reads `telemetry.traces` via durable consumer `proc-traces` with stream sequence deduplication.
-- Evaluates parent-child span trees across service boundaries to discover caller $\to$ callee relationships.
+- **Late-Arrival Safe Edge Correlation**: Correlates caller $\to$ callee edges across split NATS messages and out-of-order span deliveries with TTL-based buffering and deduplication (`edge_correlator.go`).
 - Streams derived edges into `observability.edge_events`, continuously aggregated by ClickHouse materialized views (`observability.service_edges_1m_mv`).
+- **Continuous Anomaly Production**: Evaluates rolling latency baselines, computes $Z$-scores ($\ge 3.0$), generates deterministic UUIDs for idempotency under redelivery, attributes root-cause spans, and writes `OPEN` and `RESOLVED` incidents to `observability.anomalies` (`anomaly_detector.go`).
 - Computes sliding-window Rate, Error, and Duration percentiles (P50, P95, P99).
 
 ### 4. Query API (`services/query-api`)

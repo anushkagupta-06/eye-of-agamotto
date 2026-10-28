@@ -18,10 +18,12 @@ const (
 )
 
 type TraceConsumer struct {
-	nc       *nats.Conn
-	consumer jetstream.Consumer
-	store    EdgeEventStore
-	dedup    jetstream.KeyValue
+	nc         *nats.Conn
+	consumer   jetstream.Consumer
+	store      EdgeEventStore
+	dedup      jetstream.KeyValue
+	correlator *EdgeCorrelator
+	detector   *AnomalyDetector
 }
 
 func NewTraceConsumer(ctx context.Context, store EdgeEventStore) (*TraceConsumer, error) {
@@ -80,10 +82,12 @@ func NewTraceConsumer(ctx context.Context, store EdgeEventStore) (*TraceConsumer
 	}
 
 	return &TraceConsumer{
-		nc:       nc,
-		consumer: consumer,
-		store:    store,
-		dedup:    dedup,
+		nc:         nc,
+		consumer:   consumer,
+		store:      store,
+		dedup:      dedup,
+		correlator: NewEdgeCorrelator(2 * time.Minute),
+		detector:   NewAnomalyDetector(3.0),
 	}, nil
 }
 
@@ -165,10 +169,21 @@ func (c *TraceConsumer) processMessage(ctx context.Context, msg jetstream.Msg) e
 		return fmt.Errorf("decode OTLP trace payload: %w", err)
 	}
 
-	edges := ExtractEdgeEvents(tenantID, spans)
+	edges := c.correlator.Correlate(tenantID, spans)
 
-	if err := c.store.InsertEdges(ctx, edges); err != nil {
-		return fmt.Errorf("persist %d edge events: %w", len(edges), err)
+	if len(edges) > 0 {
+		if err := c.store.InsertEdges(ctx, edges); err != nil {
+			return fmt.Errorf("persist %d edge events: %w", len(edges), err)
+		}
+	}
+
+	anomalies := c.detector.ProcessSpans(tenantID, spans)
+	for _, anom := range anomalies {
+		if err := c.store.InsertAnomaly(ctx, *anom); err != nil {
+			log.Printf("Failed to insert anomaly %s: %v", anom.ID, err)
+		} else {
+			log.Printf("Persisted anomaly: id=%s service=%s status=%s z_score=%.2f", anom.ID, anom.ServiceName, anom.Status, anom.ZScore)
+		}
 	}
 
 	// Save the marker only after the ClickHouse insert succeeds.
@@ -178,11 +193,12 @@ func (c *TraceConsumer) processMessage(ctx context.Context, msg jetstream.Msg) e
 	}
 
 	log.Printf(
-		"Processed trace message: tenant=%s sequence=%d spans=%d edge_events=%d",
+		"Processed trace message: tenant=%s sequence=%d spans=%d edge_events=%d anomalies=%d",
 		tenantID,
 		meta.Sequence.Stream,
 		len(spans),
 		len(edges),
+		len(anomalies),
 	)
 
 	return nil
