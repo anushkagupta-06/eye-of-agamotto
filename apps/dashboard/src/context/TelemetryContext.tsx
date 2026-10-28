@@ -1,20 +1,16 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { Anomaly, LogRecord, PipelineComponentStatus, REDMetric, Span } from '../types/telemetry';
-import { PIPELINE_STATUS, SYSTEM_PROFILES, type SystemProfileType } from '../api/telemetryClient';
+import { PIPELINE_STATUS, SYSTEM_PROFILES } from '../api/telemetryClient';
 import {
   fetchLiveREDMetrics,
   fetchLiveTraces,
   fetchLiveLogs,
   fetchLiveAnomalies,
+  emitLiveOTLPTrace,
 } from '../api/liveTelemetryClient';
 
 interface TelemetryContextType {
   tenant: string;
-  setTenant: (tenant: string) => void;
-  systemProfile: SystemProfileType;
-  setSystemProfile: (profile: SystemProfileType) => void;
-  systemProfileName: string;
-  systemProfileDescription: string;
   timeRange: string;
   setTimeRange: (range: string) => void;
   autoRefresh: boolean;
@@ -23,8 +19,12 @@ interface TelemetryContextType {
   setSearchQuery: (query: string) => void;
   apiKey: string;
   isAuthenticated: boolean;
-  login: (tenantId: string, key: string) => boolean;
-  logout: () => void;
+  isLoading: boolean;
+  error: string | null;
+  isStale: boolean;
+  mockMode: boolean;
+  setMockMode: (val: boolean) => void;
+  systemProfileName: string;
   redMetrics: REDMetric[];
   anomalies: Anomaly[];
   spans: Span[];
@@ -38,23 +38,32 @@ interface TelemetryContextType {
     activeServicesCount: number;
   };
   refreshData: () => void;
-  addCustomServiceTelemetry: (serviceName: string) => void;
+  emitRealServiceTrace: (serviceName: string, operation?: string, isError?: boolean) => Promise<{ traceId: string; spanId: string }>;
 }
 
 const TelemetryContext = createContext<TelemetryContextType | undefined>(undefined);
 
 export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tenant] = useState<string>('demo');
-  const [apiKey] = useState<string>('eoa_cffdedbba2a3d4f0ecb4706923ae02d5d4b2ac1a0c03ff44');
-  const [isAuthenticated] = useState<boolean>(true);
-
-  const [systemProfile, setSystemProfileState] = useState<SystemProfileType>(() => {
-    return (localStorage.getItem('eoa_system_profile') as SystemProfileType) || 'GENERAL';
-  });
+  const tenant = 'demo';
+  const apiKey = 'eoa_cffdedbba2a3d4f0ecb4706923ae02d5d4b2ac1a0c03ff44';
+  const isAuthenticated = true;
 
   const [timeRange, setTimeRange] = useState<string>('15m');
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
+
+  const [mockMode, setMockModeState] = useState<boolean>(() => {
+    return localStorage.getItem('eoa_mock_mode') === 'true';
+  });
+
+  const setMockMode = (val: boolean) => {
+    setMockModeState(val);
+    localStorage.setItem('eoa_mock_mode', String(val));
+  };
+
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isStale, setIsStale] = useState<boolean>(false);
 
   const [redMetrics, setRedMetrics] = useState<REDMetric[]>([]);
   const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
@@ -64,93 +73,21 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   const [tick, setTick] = useState(0);
 
-  const setSystemProfile = (profile: SystemProfileType) => {
-    setSystemProfileState(profile);
-    localStorage.setItem('eoa_system_profile', profile);
-  };
-
-  const addCustomServiceTelemetry = (customName: string) => {
-    const cleanName = customName.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-    if (!cleanName) return;
-
-    const newMetric: REDMetric = {
-      serviceName: cleanName,
-      operation: 'POST /v1/process',
-      callsPerMin: 12500,
-      errorCount: 12,
-      errorRate: 0.1,
-      p50Ms: 12,
-      p95Ms: 45,
-      p99Ms: 90,
-      status: 'HEALTHY',
-    };
-
-    const gatewayService = redMetrics.find((m) => /gateway|ingress|router/i.test(m.serviceName))?.serviceName || 'api-gateway';
-    const traceId = 'c' + Math.random().toString(16).slice(2, 17) + Math.random().toString(16).slice(2, 17);
-    const rootSpanId = 'r' + Math.random().toString(16).slice(2, 17);
-    const childSpanId = 's' + Math.random().toString(16).slice(2, 17);
-
-    const now = new Date();
-    const childTime = new Date(now.getTime() + 10);
-
-    const rootSpan: Span = {
-      tenantId: tenant,
-      traceId,
-      spanId: rootSpanId,
-      parentSpanId: '',
-      serviceName: gatewayService,
-      name: `PROXY /api/v1/${cleanName}`,
-      kind: 'SERVER',
-      startTime: now.toISOString(),
-      durationNs: 65000000,
-      statusCode: 'OK',
-      httpStatusCode: 200,
-      attributes: { 'http.route': `/api/v1/${cleanName}` },
-      resourceAttributes: { 'service.name': gatewayService },
-      ingestedAt: now.toISOString(),
-    };
-
-    const childSpan: Span = {
-      tenantId: tenant,
-      traceId,
-      spanId: childSpanId,
-      parentSpanId: rootSpanId,
-      serviceName: cleanName,
-      name: 'POST /v1/process',
-      kind: 'SERVER',
-      startTime: childTime.toISOString(),
-      durationNs: 45000000,
-      statusCode: 'OK',
-      httpStatusCode: 200,
-      attributes: { 'custom.registered': 'true' },
-      resourceAttributes: { 'service.name': cleanName, 'environment': 'custom' },
-      ingestedAt: childTime.toISOString(),
-    };
-
-    const newLog: LogRecord = {
-      tenantId: tenant,
-      timestamp: now.toISOString(),
-      serviceName: cleanName,
-      severityText: 'INFO',
-      severityNumber: 9,
-      body: `Custom microservice ${cleanName} registered and actively emitting OpenTelemetry spans`,
-      traceId: traceId,
-      spanId: childSpanId,
-      attributes: { 'status': 'READY' },
-      resourceAttributes: { 'service.name': cleanName },
-    };
-
-    setRedMetrics((prev) => [...prev.filter((m) => m.serviceName !== cleanName), newMetric]);
-    setSpans((prev) => [childSpan, rootSpan, ...prev]);
-    setLogs((prev) => [newLog, ...prev]);
-  };
-
-  const login = (): boolean => true;
-  const logout = () => {};
-  const setTenant = () => {};
-
-  const refreshData = () => {
+  const refreshData = useCallback(() => {
     setTick((prev) => prev + 1);
+  }, []);
+
+  const emitRealServiceTrace = async (
+    serviceName: string,
+    operation: string = 'POST /v1/process',
+    isError: boolean = false
+  ) => {
+    const res = await emitLiveOTLPTrace(serviceName, operation, isError);
+    // Refresh telemetry data after a brief buffer delay for ingestion and rollup
+    setTimeout(() => {
+      refreshData();
+    }, 800);
+    return res;
   };
 
   useEffect(() => {
@@ -161,17 +98,34 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => clearInterval(interval);
   }, [autoRefresh]);
 
-  // Synchronize dynamic live data from QueryAPI / ClickHouse backend
+  // Load telemetry from Query API (or explicitly requested mock fixtures)
   useEffect(() => {
     let isMounted = true;
 
-    const loadLiveTelemetry = async () => {
+    const loadData = async () => {
+      if (mockMode) {
+        // Explicit Mock Mode requested by user
+        const fixture = SYSTEM_PROFILES['GENERAL'];
+        if (isMounted) {
+          setRedMetrics(fixture.redMetrics);
+          setAnomalies(fixture.anomalies);
+          setSpans(fixture.spans);
+          setLogs(fixture.logs);
+          setIsLoading(false);
+          setError(null);
+          setIsStale(false);
+        }
+        return;
+      }
+
+      setIsLoading((prev) => (redMetrics.length === 0 ? true : prev));
+
       try {
         const [liveRED, liveSpans, liveLogs, liveAnomalies] = await Promise.all([
-          fetchLiveREDMetrics(),
-          fetchLiveTraces(),
-          fetchLiveLogs(),
-          fetchLiveAnomalies(),
+          fetchLiveREDMetrics(timeRange),
+          fetchLiveTraces(timeRange),
+          fetchLiveLogs({ range: timeRange }),
+          fetchLiveAnomalies('24h'),
         ]);
 
         if (isMounted) {
@@ -179,18 +133,26 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           setSpans(liveSpans);
           setLogs(liveLogs);
           setAnomalies(liveAnomalies);
+          setError(null);
+          setIsStale(false);
+          setIsLoading(false);
         }
-      } catch (err) {
-        console.warn('Live telemetry sync failed:', err);
+      } catch (err: any) {
+        if (isMounted) {
+          console.warn('Query API sync error:', err);
+          setError(err?.message || 'Failed to connect to Query API backend');
+          setIsStale(true);
+          setIsLoading(false);
+        }
       }
     };
 
-    loadLiveTelemetry();
+    loadData();
 
     return () => {
       isMounted = false;
     };
-  }, [tick]);
+  }, [tick, timeRange, mockMode]);
 
   // Derived high-level stats
   const totalCalls = redMetrics.reduce((acc, m) => acc + m.callsPerMin, 0);
@@ -204,11 +166,6 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     <TelemetryContext.Provider
       value={{
         tenant,
-        setTenant,
-        systemProfile,
-        setSystemProfile,
-        systemProfileName: SYSTEM_PROFILES[systemProfile].name,
-        systemProfileDescription: SYSTEM_PROFILES[systemProfile].description,
         timeRange,
         setTimeRange,
         autoRefresh,
@@ -217,8 +174,12 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setSearchQuery,
         apiKey,
         isAuthenticated,
-        login,
-        logout,
+        isLoading,
+        error,
+        isStale,
+        mockMode,
+        setMockMode,
+        systemProfileName: mockMode ? 'Demo Microservices (Mock Mode)' : 'Live Telemetry (Single-Tenant)',
         redMetrics,
         anomalies,
         spans,
@@ -232,7 +193,7 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           activeServicesCount: redMetrics.length,
         },
         refreshData,
-        addCustomServiceTelemetry,
+        emitRealServiceTrace,
       }}
     >
       {children}

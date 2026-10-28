@@ -3,7 +3,7 @@ import { Key, Copy, Check, Terminal, Database, Zap } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
 
 export const SettingsPage: React.FC = () => {
-  const { tenant, apiKey } = useTelemetry();
+  const { tenant, apiKey, mockMode, setMockMode } = useTelemetry();
   const [copiedKey, setCopiedKey] = useState(false);
   const [copiedCurl, setCopiedCurl] = useState(false);
 
@@ -36,6 +36,60 @@ export const SettingsPage: React.FC = () => {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        {/* Telemetry Ingestion Mode */}
+        <div className="panel-card">
+          <div className="panel-title">
+            <span>Platform Telemetry Mode</span>
+            <span className={`badge ${mockMode ? 'warning' : 'healthy'}`}>
+              {mockMode ? 'MOCK FIXTURE MODE' : 'LIVE QUERY API (PRODUCTION)'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+            <div style={{ maxWidth: '620px' }}>
+              <div style={{ fontWeight: 600, color: '#fff', fontSize: '0.9rem', marginBottom: '4px' }}>
+                {mockMode ? 'Offline Mock Fixtures Active' : 'Live Platform Telemetry Active'}
+              </div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', margin: 0 }}>
+                {mockMode
+                  ? 'The dashboard is currently presenting static microservice fixtures for UI demonstration. Live Query API endpoints are bypassed.'
+                  : 'The dashboard is querying the live Query API on :8082, NATS JetStream live tail SSE, and ClickHouse. Zero simulated data is presented as live.'}
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                type="button"
+                className={`btn-secondary ${!mockMode ? 'active' : ''}`}
+                onClick={() => setMockMode(false)}
+                style={{
+                  padding: '8px 16px',
+                  fontWeight: 600,
+                  fontSize: '0.8rem',
+                  borderColor: !mockMode ? 'var(--accent-emerald)' : 'var(--border-subtle)',
+                  color: !mockMode ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                }}
+              >
+                ● Real Live API
+              </button>
+              <button
+                type="button"
+                className={`btn-secondary ${mockMode ? 'active' : ''}`}
+                onClick={() => setMockMode(true)}
+                style={{
+                  padding: '8px 16px',
+                  fontWeight: 600,
+                  fontSize: '0.8rem',
+                  borderColor: mockMode ? 'var(--accent-amber)' : 'var(--border-subtle)',
+                  color: mockMode ? 'var(--accent-amber)' : 'var(--text-secondary)',
+                }}
+              >
+                ● Demo Mock Mode
+              </button>
+            </div>
+          </div>
+        </div>
+
         {/* Tenant API Key Card */}
         <div className="panel-card">
           <div className="panel-title">

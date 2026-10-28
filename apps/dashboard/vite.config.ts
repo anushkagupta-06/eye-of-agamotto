@@ -33,11 +33,6 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api\/mcp/, ''),
         },
-        '/api/clickhouse': {
-          target: 'http://127.0.0.1:8123',
-          changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/api\/clickhouse/, ''),
-        },
         '/api/gateway': {
           target: 'http://127.0.0.1:4318',
           changeOrigin: true,

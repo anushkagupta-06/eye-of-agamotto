@@ -93,3 +93,35 @@ export async function mcpListAnomalies(range?: string) {
 export async function mcpExplainAnomaly(id: string) {
   return callMCPTool('explainAnomaly', { id });
 }
+
+export interface ExecutedToolInfo {
+  name: string;
+  args: Record<string, any>;
+  success: boolean;
+  durationMs: number;
+  summary: string;
+}
+
+export interface AssistantChatResult {
+  response: string;
+  toolsExecuted: ExecutedToolInfo[];
+  liveDataGrounded: boolean;
+}
+
+/**
+ * Route assistant requests through the backend orchestration layer.
+ * Keeps provider credentials safe on the server and executes real MCP tools.
+ */
+export async function callAssistantOrchestrator(message: string): Promise<AssistantChatResult> {
+  const res = await fetch(`${MCP_SERVER_URL}/api/assistant/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Assistant orchestrator returned HTTP ${res.status}`);
+  }
+
+  return res.json();
+}

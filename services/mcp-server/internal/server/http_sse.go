@@ -23,6 +23,7 @@ func (s *HTTPServer) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", s.handleHealth)
 	mux.HandleFunc("/mcp", s.handleMCP)
 	mux.HandleFunc("/sse", s.handleSSE)
+	s.RegisterAssistantRoute(mux)
 }
 
 func (s *HTTPServer) handleHealth(w http.ResponseWriter, r *http.Request) {

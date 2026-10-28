@@ -78,9 +78,10 @@ Modern production software architectures are split across ephemeral microservice
 | **Log Explorer with Trace Correlation** | **Completed** | Full-text, regex, level, and span/trace-id filters with 1-click drill-down in [`LogsPage.tsx`](file:///apps/dashboard/src/pages/LogsPage.tsx). |
 | **Model Context Protocol (MCP) Server** | **Completed** | 6 standard tools (`search_traces`, `get_trace`, `query_logs`, `get_service_topology`, `list_anomalies`, `explain_anomaly`) over stdio and SSE in [`services/mcp-server`](file:///services/mcp-server/). |
 | **Automated Root-Cause Correlation (Continuous Daemon)** | **Completed** | Continuous streaming anomaly detection ($Z$-score $\ge 3.0$), root-cause attribution, and lifecycle tracking (`OPEN`/`RESOLVED`) in [`services/stream-processor`](file:///services/stream-processor/). |
+| **Single-Tenant Zero-Login Contract & Direct Query API Wiring** | **Completed** | Production dashboard loads directly with zero login barriers; all views consume Go Query API (`/api/v1/*`); ClickHouse credentials kept strictly server-side. |
+| **Real MCP AI Assistant Orchestration** | **Completed** | Backend assistant orchestrator (`POST /api/assistant/chat`) executes multi-turn tool loops with live MCP tools, observable metrics, and grounded data. |
 | **Built-in 5-Microservice Demo Workload & Fault Injector** | **Roadmap** | Benchmark script (`smoke-ingest.sh`) exists; containerized multi-service mock cluster + k6 chaos injector in roadmap. |
 | **Virtualized Infinite Scroll (100k+ rows)** | **Roadmap** | TanStack Virtual installed in `package.json`; currently utilizes server-side pagination with real-time SSE. |
-| **Multi-Tenant User Login & RBAC UI** | **Roadmap** | Simulated dev auth currently active; OIDC/JWT login UI deferred to production deployment roadmap. |
 
 ---
 

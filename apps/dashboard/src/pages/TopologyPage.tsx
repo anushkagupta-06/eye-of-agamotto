@@ -12,62 +12,38 @@ export interface TopologyEdge {
 }
 
 export const TopologyPage: React.FC = () => {
-  const { systemProfileName, redMetrics, spans } = useTelemetry();
+  const { systemProfileName, redMetrics } = useTelemetry();
   const [liveEdges, setLiveEdges] = useState<TopologyEdge[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
-    fetchLiveTopology().then((edges) => {
-      if (mounted) setLiveEdges(edges);
-    });
-    const interval = setInterval(() => {
-      fetchLiveTopology().then((edges) => {
-        if (mounted) setLiveEdges(edges);
-      });
-    }, 5000);
+    const load = async () => {
+      try {
+        const edges = await fetchLiveTopology();
+        if (mounted) {
+          setLiveEdges(edges);
+          setError(null);
+          setIsLoading(false);
+        }
+      } catch (err: any) {
+        if (mounted) {
+          setError(err?.message || 'Failed to query service topology from backend');
+          setIsLoading(false);
+        }
+      }
+    };
+
+    load();
+    const interval = setInterval(load, 5000);
     return () => {
       mounted = false;
       clearInterval(interval);
     };
   }, []);
 
-  // Derive dynamic edges from live backend edges or active spans
-  const getDynamicEdges = (): TopologyEdge[] => {
-    if (liveEdges.length > 0) {
-      return liveEdges;
-    }
-    const derivedEdges: TopologyEdge[] = [];
-    const spanMap = new Map<string, string>(); // spanId -> serviceName
-
-    spans.forEach((s) => {
-      spanMap.set(s.spanId, s.serviceName);
-    });
-
-    // Check parent-child span pairs
-    spans.forEach((s) => {
-      if (s.parentSpanId && spanMap.has(s.parentSpanId)) {
-        const caller = spanMap.get(s.parentSpanId)!;
-        const callee = s.serviceName;
-        if (caller !== callee) {
-          const calleeMetric = redMetrics.find((m) => m.serviceName === callee);
-          const existing = derivedEdges.find((e) => e.caller === caller && e.callee === callee);
-          if (!existing) {
-            derivedEdges.push({
-              caller,
-              callee,
-              calls: calleeMetric?.callsPerMin || 1,
-              errors: calleeMetric?.errorCount || (s.statusCode === 'ERROR' ? 1 : 0),
-              p95LatencyMs: calleeMetric?.p95Ms || Math.round(s.durationNs / 1000000),
-            });
-          }
-        }
-      }
-    });
-
-    return derivedEdges;
-  };
-
-  const edges = getDynamicEdges();
+  const edges = liveEdges;
 
   // Dynamically group all active services into 3 architectural tiers
   const isGateway = (name: string) => /gateway|ingress|router|proxy|feed/i.test(name);
@@ -102,10 +78,30 @@ export const TopologyPage: React.FC = () => {
         <div className="panel-title">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Network size={18} style={{ color: 'var(--accent-emerald)' }} />
-            <span>Distributed Dependency Graph ({systemProfileName})</span>
+            <span>Distributed Dependency Graph</span>
           </div>
-          <span className="badge healthy">Auto-Discovered from Spans ({redMetrics.length} Services)</span>
+          <span className="badge healthy">{isLoading ? 'Syncing...' : `Auto-Discovered from Spans (${redMetrics.length} Services)`}</span>
         </div>
+
+        {error && (
+          <div
+            style={{
+              padding: '12px 16px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid var(--accent-red)',
+              borderRadius: '8px',
+              color: 'var(--accent-red)',
+              marginBottom: '14px',
+              fontSize: '0.82rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <Activity size={16} />
+            <span><strong>Query API Outage / Topology Error:</strong> {error}</span>
+          </div>
+        )}
 
         {/* Visual Map Canvas Representation */}
         <div

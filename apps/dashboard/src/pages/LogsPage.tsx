@@ -16,27 +16,38 @@ import {
   SlidersHorizontal,
   Code2
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 import type { LogRecord } from '../types/telemetry';
 
 export const LogsPage: React.FC = () => {
   const { logs: contextLogs } = useTelemetry();
+  const [searchParams] = useSearchParams();
+  const urlTraceId = searchParams.get('traceId') || '';
+  const urlService = searchParams.get('service') || '';
+  const urlSeverity = searchParams.get('severity') || '';
+
   const [streamedLogs, setStreamedLogs] = useState<LogRecord[]>([]);
 
-  // Merged live stream: real-time streamed logs + base context logs
-  const logs = [...streamedLogs, ...contextLogs];
-
   // Filter States
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState<string>(() => urlTraceId || '');
   const [isRegexMode, setIsRegexMode] = useState(false);
   const [regexError, setRegexError] = useState<string | null>(null);
-  const [severityFilter, setSeverityFilter] = useState<string>('ALL');
-  const [selectedService, setSelectedService] = useState<string>('ALL');
+  const [severityFilter, setSeverityFilter] = useState<string>(() => urlSeverity || 'ALL');
+  const [selectedService, setSelectedService] = useState<string>(() => urlService || 'ALL');
   const [hasTraceOnly, setHasTraceOnly] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (urlTraceId) {
+      setSearchTerm(urlTraceId);
+    }
+  }, [urlTraceId]);
 
   // Live Tail State
   const [isLiveTail, setIsLiveTail] = useState(true);
+
+  // Merged live stream: real-time streamed logs + base context logs
+  const logs = [...streamedLogs, ...contextLogs];
 
   // Dynamically derive unique services from the current logs stream
   const uniqueServices = Array.from(new Set(logs.map((l) => l.serviceName))).sort();

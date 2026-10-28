@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Layers,
   AlertCircle,
@@ -9,13 +9,15 @@ import {
   Info,
   GitCommit,
   Clock,
-  Globe
+  Globe,
+  Search
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 import type { Span } from '../types/telemetry';
 import { TraceFlamegraphD3 } from '../components/traces/TraceFlamegraphD3';
 import { TraceDAGView } from '../components/traces/TraceDAGView';
+import { fetchTraceDetail } from '../api/liveTelemetryClient';
 
 // Deterministic vibrant color per microservice name (like Jaeger / Datadog)
 const SERVICE_COLOR_PALETTE: Record<string, string> = {
@@ -59,17 +61,32 @@ interface SpanTreeNode {
 
 export const TracesPage: React.FC = () => {
   const { spans } = useTelemetry();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlTraceId = searchParams.get('traceId') || '';
+  const urlService = searchParams.get('service') || '';
+  const urlStatus = searchParams.get('status') || '';
 
-  // Group spans into distinct traces
+  const [directSpans, setDirectSpans] = useState<Span[]>([]);
+  const [manualTraceInput, setManualTraceInput] = useState<string>('');
+  const [isSearchingTrace, setIsSearchingTrace] = useState<boolean>(false);
+  const [lookupError, setLookupError] = useState<string | null>(null);
+
+  // Group spans into distinct traces, merging any directly fetched trace spans
+  const combinedSpans = useMemo(() => {
+    if (directSpans.length === 0) return spans;
+    const directIds = new Set(directSpans.map((s) => s.spanId));
+    return [...directSpans, ...spans.filter((s) => !directIds.has(s.spanId))];
+  }, [spans, directSpans]);
+
   const tracesMap = useMemo(() => {
     const map = new Map<string, Span[]>();
-    spans.forEach((span) => {
+    combinedSpans.forEach((span) => {
       const list = map.get(span.traceId) || [];
       list.push(span);
       map.set(span.traceId, list);
     });
     return map;
-  }, [spans]);
+  }, [combinedSpans]);
 
   const traceSummaries = useMemo(() => {
     const summaries: Array<{
@@ -91,12 +108,12 @@ export const TracesPage: React.FC = () => {
 
       summaries.push({
         traceId,
-        rootService: rootSpan.serviceName,
-        rootOperation: rootSpan.name,
+        rootService: rootSpan?.serviceName || 'unknown',
+        rootOperation: rootSpan?.name || 'unknown',
         spanCount: traceSpans.length,
         durationMs: Math.round(maxDuration / 1000000),
         hasError,
-        httpStatusCode: rootSpan.httpStatusCode,
+        httpStatusCode: rootSpan?.httpStatusCode,
         services,
       });
     });
@@ -106,19 +123,64 @@ export const TracesPage: React.FC = () => {
 
   // Selected Trace State
   const [activeTraceId, setActiveTraceId] = useState<string>(() => {
-    return traceSummaries[0]?.traceId || spans[0]?.traceId || '';
+    return urlTraceId || traceSummaries[0]?.traceId || spans[0]?.traceId || '';
   });
+
+  // Direct trace lookup via URL
+  useEffect(() => {
+    if (urlTraceId && !tracesMap.has(urlTraceId)) {
+      fetchTraceDetail(urlTraceId)
+        .then((detailSpans) => {
+          if (detailSpans.length > 0) {
+            setDirectSpans(detailSpans);
+            setActiveTraceId(urlTraceId);
+          }
+        })
+        .catch((err) => {
+          console.warn('Direct trace fetch failed:', err);
+        });
+    } else if (urlTraceId) {
+      setActiveTraceId(urlTraceId);
+    }
+  }, [urlTraceId, tracesMap]);
+
+  const handleTraceLookup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const id = manualTraceInput.trim();
+    if (!id) return;
+    setIsSearchingTrace(true);
+    setLookupError(null);
+    try {
+      const fetched = await fetchTraceDetail(id);
+      if (fetched.length > 0) {
+        setDirectSpans(fetched);
+        setActiveTraceId(id);
+        setSearchParams({ traceId: id });
+        setManualTraceInput('');
+      } else {
+        setLookupError(`Trace ID ${id} not found in ClickHouse`);
+      }
+    } catch (err: any) {
+      setLookupError(err.message || 'Trace lookup failed');
+    } finally {
+      setIsSearchingTrace(false);
+    }
+  };
 
   // Filter Trace List
   const [filterMode, setFilterMode] = useState<'ALL' | 'ERRORS'>('ALL');
   const [viewMode, setViewMode] = useState<'FLAMEGRAPH' | 'DAG' | 'TABLE'>('FLAMEGRAPH');
 
   const visibleSummaries = useMemo(() => {
-    if (filterMode === 'ERRORS') {
-      return traceSummaries.filter((t) => t.hasError);
+    let list = traceSummaries;
+    if (filterMode === 'ERRORS' || urlStatus === 'ERROR') {
+      list = list.filter((t) => t.hasError);
     }
-    return traceSummaries;
-  }, [traceSummaries, filterMode]);
+    if (urlService && urlService !== 'ALL') {
+      list = list.filter((t) => t.services.includes(urlService));
+    }
+    return list;
+  }, [traceSummaries, filterMode, urlService, urlStatus]);
 
   // Active trace spans
   const activeTraceSpans = useMemo(() => {
@@ -237,6 +299,64 @@ export const TracesPage: React.FC = () => {
         </div>
       </div>
 
+      {/* Trace Search & Direct ID Lookup Bar */}
+      <div
+        className="panel-card"
+        style={{
+          padding: '10px 16px',
+          marginBottom: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '12px',
+          flexWrap: 'wrap',
+        }}
+      >
+        <form onSubmit={handleTraceLookup} style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, maxWidth: '520px' }}>
+          <Search size={15} style={{ color: 'var(--text-muted)' }} />
+          <input
+            type="text"
+            placeholder="Search specific Trace ID (e.g. 4bf92f3577b34da6a3ce929d0e0e4736)..."
+            value={manualTraceInput}
+            onChange={(e) => setManualTraceInput(e.target.value)}
+            style={{
+              flex: 1,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              padding: '6px 10px',
+              fontSize: '0.78rem',
+              color: '#fff',
+              outline: 'none',
+              fontFamily: 'var(--font-mono)',
+            }}
+          />
+          <button type="submit" className="btn-secondary" disabled={isSearchingTrace} style={{ padding: '6px 12px', fontSize: '0.76rem' }}>
+            <span>{isSearchingTrace ? 'Searching...' : 'Lookup Trace'}</span>
+          </button>
+        </form>
+
+        {urlService && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            <span>Filtered by Service:</span>
+            <span className="code-pill" style={{ color: 'var(--accent-emerald)' }}>{urlService}</span>
+            <button
+              onClick={() => setSearchParams({})}
+              style={{ background: 'none', border: 'none', color: 'var(--accent-red)', cursor: 'pointer', fontSize: '0.75rem' }}
+            >
+              Clear
+            </button>
+          </div>
+        )}
+
+        {lookupError && (
+          <div style={{ fontSize: '0.74rem', color: 'var(--accent-red)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <AlertCircle size={13} />
+            <span>{lookupError}</span>
+          </div>
+        )}
+      </div>
+
       {/* Trace Selector Pill Carousel */}
       <div
         className="panel-card"
@@ -276,54 +396,73 @@ export const TracesPage: React.FC = () => {
 
         {/* Trace Quick Pills */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flex: 1, minWidth: '300px' }}>
-          {visibleSummaries.map((t) => {
-            const isActive = t.traceId === activeTraceId;
-            return (
-              <button
-                key={t.traceId}
-                type="button"
-                onClick={() => {
-                  setActiveTraceId(t.traceId);
-                  const firstSpan = tracesMap.get(t.traceId)?.[0];
-                  if (firstSpan) setSelectedSpanId(firstSpan.spanId);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  padding: '6px 12px',
-                  borderRadius: '8px',
-                  backgroundColor: isActive ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-card)',
-                  border: isActive ? '1px solid var(--accent-emerald)' : '1px solid var(--border-subtle)',
-                  color: isActive ? '#fff' : 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  fontSize: '0.75rem',
-                  fontWeight: 500,
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                {t.hasError ? (
-                  <AlertCircle size={13} style={{ color: '#f87171' }} />
-                ) : (
-                  <CheckCircle2 size={13} style={{ color: '#10b981' }} />
-                )}
-                <span style={{ fontWeight: 600 }}>{t.rootService}</span>
-                <span style={{ color: 'var(--text-muted)' }}>({t.durationMs}ms)</span>
-                {t.httpStatusCode && (
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: t.httpStatusCode >= 400 ? '#f87171' : 'var(--accent-emerald)' }}>
-                    HTTP {t.httpStatusCode}
+          {visibleSummaries.length === 0 ? (
+            <div style={{ padding: '6px 0', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+              No traces found in current window.
+            </div>
+          ) : (
+            visibleSummaries.map((t) => {
+              const isActive = t.traceId === activeTraceId;
+              return (
+                <button
+                  key={t.traceId}
+                  type="button"
+                  onClick={() => {
+                    setActiveTraceId(t.traceId);
+                    setSearchParams({ traceId: t.traceId });
+                    const firstSpan = tracesMap.get(t.traceId)?.[0];
+                    if (firstSpan) setSelectedSpanId(firstSpan.spanId);
+                  }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    padding: '6px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: isActive ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-card)',
+                    border: isActive ? '1px solid var(--accent-emerald)' : '1px solid var(--border-subtle)',
+                    color: isActive ? '#fff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    fontSize: '0.75rem',
+                    fontWeight: 500,
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {t.hasError ? (
+                    <AlertCircle size={13} style={{ color: '#f87171' }} />
+                  ) : (
+                    <CheckCircle2 size={13} style={{ color: '#10b981' }} />
+                  )}
+                  <span style={{ fontWeight: 600 }}>{t.rootService}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>({t.durationMs}ms)</span>
+                  {t.httpStatusCode && (
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: t.httpStatusCode >= 400 ? '#f87171' : 'var(--accent-emerald)' }}>
+                      HTTP {t.httpStatusCode}
+                    </span>
+                  )}
+                  <span className="code-pill" style={{ fontSize: '0.65rem' }}>
+                    {t.spanCount} spans
                   </span>
-                )}
-                <span className="code-pill" style={{ fontSize: '0.65rem' }}>
-                  {t.spanCount} spans
-                </span>
-              </button>
-            );
-          })}
+                </button>
+              );
+            })
+          )}
         </div>
       </div>
 
       {/* Main Full-Width Distributed Trace Canvas */}
+      {activeTraceSpans.length === 0 ? (
+        <div className="panel-card" style={{ padding: '60px 20px', textAlign: 'center', color: 'var(--text-muted)', marginBottom: '20px' }}>
+          <GitCommit size={38} style={{ margin: '0 auto 12px', opacity: 0.4, color: 'var(--accent-emerald)' }} />
+          <h3 style={{ color: 'var(--text-primary)', marginBottom: '8px' }}>No Traces Ingested Yet</h3>
+          <p style={{ maxWidth: '480px', margin: '0 auto 16px', fontSize: '0.84rem' }}>
+            No spans recorded in ClickHouse <code>observability.spans</code> for tenant <code>demo</code> in this window. Send an OTLP trace via the gateway or click below:
+          </p>
+          <Link to="/" className="btn-primary" style={{ display: 'inline-flex', textDecoration: 'none' }}>
+            Emit Live Trace from Dashboard
+          </Link>
+        </div>
+      ) : (
       <div className="panel-card" style={{ padding: '0', overflow: 'hidden', marginBottom: '20px' }}>
         {/* View Switcher Top Header */}
         <div
@@ -619,6 +758,7 @@ export const TracesPage: React.FC = () => {
           </div>
         )}
       </div>
+      )}
 
       {/* Selected Span Details Inspector */}
       {selectedSpan && (

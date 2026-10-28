@@ -194,3 +194,12 @@ GROUP BY caller, callee;
 2. Shared decoding code: keep it private to the writer, or move it to a shared package for the processor?
 3. A dedicated `processor` ClickHouse user instead of reusing `writer` (small hardening task).
 4. future improvement: instrumentation scope name and version, span events, span links.
+
+## 7. Platform Integration & Single-Tenant Contract (Completed)
+
+- **Single Tenant Locked to `demo`**: Query API and MCP servers enforce tenant `demo` on the server. Callers cannot change or spoof the returned tenant data via request headers or query parameters.
+- **Direct ClickHouse Browser Access Retired**: All dashboard telemetry views (Traces, Live Logs, Topology, Anomalies, and Overview) now query through the Go Query API (`/api/query/api/v1/*`), keeping ClickHouse credentials strictly server-side.
+- **Zero-Login Dashboard**: The React 19 dashboard loads directly into live observability screens with no simulated login check or login wall.
+- **Real Backend MCP Assistant Orchestration**: The AI assistant communicates through `POST /api/mcp/api/assistant/chat`, which securely runs the model tool-calling loop on the server, invoking real MCP tools against ClickHouse with observable execution metrics.
+- **Continuous Edge Correlation & Anomaly Production**: The stream processor automatically correlates out-of-order/split-message spans (`edge_correlator.go`) and continuously produces $Z$-score anomalies ($Z \ge 3.0\sigma$) into `observability.anomalies`.
+- **Quality Gates & CI**: Continuous Integration workflow (`.github/workflows/ci.yml`) runs Go test suites across all 5 microservices, TypeScript build validation, and end-to-end integration tests.

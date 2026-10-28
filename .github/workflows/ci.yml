@@ -1,0 +1,55 @@
+name: Eye of Agamotto CI
+
+on:
+  push:
+    branches: [ "main", "test" ]
+  pull_request:
+    branches: [ "main", "test" ]
+
+jobs:
+  go-services:
+    name: Go Backend Services & Quality Gates
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache-dependency-path: services/go.sum
+
+      - name: Verify Go Dependencies
+        run: |
+          cd services
+          go mod verify
+
+      - name: Run Backend & E2E Integration Tests
+        run: |
+          cd services
+          go test -v -race ./...
+
+  dashboard:
+    name: React Dashboard Build & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/dashboard/package-lock.json
+
+      - name: Install Dashboard Dependencies
+        run: |
+          cd apps/dashboard
+          npm ci
+
+      - name: TypeScript Typecheck & Production Build
+        run: |
+          cd apps/dashboard
+          npm run build

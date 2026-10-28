@@ -10,24 +10,32 @@ import { Link } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 
 export const DashboardOverview: React.FC = () => {
-  const { systemProfileName, addCustomServiceTelemetry } = useTelemetry();
+  const { systemProfileName, emitRealServiceTrace } = useTelemetry();
   const [showAddModal, setShowAddModal] = useState(false);
   const [customServiceName, setCustomServiceName] = useState('');
   const [justAdded, setJustAdded] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [lastAddedServiceName, setLastAddedServiceName] = useState<string | null>(null);
 
-  const handleAddService = (e: React.FormEvent) => {
+  const handleAddService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customServiceName.trim()) return;
+    if (!customServiceName.trim() || isSubmitting) return;
     const name = customServiceName.trim();
-    addCustomServiceTelemetry(name);
-    setJustAdded(true);
-    setLastAddedServiceName(name);
-    setCustomServiceName('');
-    setTimeout(() => {
-      setJustAdded(false);
-      setShowAddModal(false);
-    }, 1000);
+    setIsSubmitting(true);
+    try {
+      await emitRealServiceTrace(name);
+      setJustAdded(true);
+      setLastAddedServiceName(name);
+      setCustomServiceName('');
+      setTimeout(() => {
+        setJustAdded(false);
+        setShowAddModal(false);
+      }, 1200);
+    } catch (err) {
+      console.error('Failed to emit live trace:', err);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -78,7 +86,7 @@ export const DashboardOverview: React.FC = () => {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
             <span style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>
-              Register & Trace Any Custom Microservice
+              Emit Live OTLP Trace (End-to-End Pipeline)
             </span>
             <button
               onClick={() => setShowAddModal(false)}
@@ -88,12 +96,12 @@ export const DashboardOverview: React.FC = () => {
             </button>
           </div>
           <p style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-            The Eye of Agamotto is a universal OpenTelemetry engine. Type any microservice name below to immediately register and observe it:
+            Publishes a real OTLP trace payload directly to the Ingestion Gateway (<code>POST /v1/traces</code>) via NATS JetStream and ClickHouse:
           </p>
           <form onSubmit={handleAddService} style={{ display: 'flex', gap: '10px' }}>
             <input
               type="text"
-              placeholder="e.g. fraud-detector, patient-service, recommendation-engine..."
+              placeholder="e.g. payment-service, order-processor, auth-engine..."
               value={customServiceName}
               onChange={(e) => setCustomServiceName(e.target.value)}
               style={{
@@ -107,9 +115,9 @@ export const DashboardOverview: React.FC = () => {
                 outline: 'none',
               }}
             />
-            <button type="submit" className="btn-primary">
+            <button type="submit" className="btn-primary" disabled={isSubmitting}>
               {justAdded ? <Check size={15} /> : <Plus size={15} />}
-              <span>{justAdded ? 'Registered!' : 'Register Service'}</span>
+              <span>{justAdded ? 'Trace Ingested!' : isSubmitting ? 'Ingesting...' : 'Emit Real Trace'}</span>
             </button>
           </form>
         </div>

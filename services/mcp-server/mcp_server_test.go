@@ -247,4 +247,25 @@ func TestMCPHTTPRoutes(t *testing.T) {
 	if jsonResp.Error != nil {
 		t.Errorf("unexpected error in response: %+v", jsonResp.Error)
 	}
+
+	// Assistant chat endpoint
+	chatBody := `{"message":"Analyze active anomalies and failing services"}`
+	req = httptest.NewRequest(http.MethodPost, "/api/assistant/chat", strings.NewReader(chatBody))
+	req.Header.Set("Content-Type", "application/json")
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("assistant chat expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+
+	var chatResp server.AssistantChatResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &chatResp); err != nil {
+		t.Fatalf("failed to decode assistant chat response: %v", err)
+	}
+	if len(chatResp.ToolsExecuted) == 0 {
+		t.Fatalf("expected observable toolsExecuted, got none")
+	}
+	if chatResp.Response == "" {
+		t.Fatalf("expected non-empty assistant response")
+	}
 }

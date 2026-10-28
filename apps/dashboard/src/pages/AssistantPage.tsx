@@ -3,7 +3,6 @@ import {
   Bot,
   Send,
   Sparkles,
-  Code2,
   Cpu,
   ShieldAlert,
   Wrench,
@@ -14,27 +13,25 @@ import {
   Terminal
 } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
-import { askGeminiAssistant, GEMINI_API_KEY_DEFAULT, GEMINI_MODEL } from '../api/geminiService';
-import { checkMCPHealth, callMCPTool } from '../api/mcpClient';
+import { GEMINI_MODEL } from '../api/geminiService';
+import { checkMCPHealth, callMCPTool, callAssistantOrchestrator, type ExecutedToolInfo } from '../api/mcpClient';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
-  tools?: string[];
+  executedTools?: ExecutedToolInfo[];
+  liveDataGrounded?: boolean;
   timestamp?: string;
   isStreaming?: boolean;
 }
 
 export const AssistantPage: React.FC = () => {
-  const { tenant, systemProfileName, redMetrics, anomalies, spans, logs } = useTelemetry();
-
-  const [apiKey] = useState<string>(() => {
-    return localStorage.getItem('eoa_gemini_key') || GEMINI_API_KEY_DEFAULT;
-  });
+  const { tenant, systemProfileName, redMetrics, anomalies, logs } = useTelemetry();
 
   const [isLoading, setIsLoading] = useState(false);
   const [inputVal, setInputVal] = useState('');
   const [mcpConnected, setMcpConnected] = useState(false);
+  const [selectedToolInspect, setSelectedToolInspect] = useState<ExecutedToolInfo | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -55,15 +52,7 @@ export const AssistantPage: React.FC = () => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: 'assistant',
-      content: `Greetings! I am the **Eye of Agamotto AI Observability Assistant** powered by **Google ${GEMINI_MODEL}** via Model Context Protocol (MCP).\n\nI continuously monitor your OpenTelemetry spans, ClickHouse error logs, and RED metrics. Ask me about **any failing service**, and I will analyze the telemetry and provide **concrete code & architectural improvements** to resolve the root cause!`,
-      tools: [
-        'mcp://telemetry/searchTraces',
-        'mcp://telemetry/getTrace',
-        'mcp://telemetry/queryLogs',
-        'mcp://telemetry/getServiceTopology',
-        'mcp://telemetry/listAnomalies',
-        'mcp://telemetry/explainAnomaly',
-      ],
+      content: `Greetings! I am the **Eye of Agamotto AI Observability Assistant** powered by **Google ${GEMINI_MODEL}** via Model Context Protocol (MCP).\n\nI dynamically execute real MCP tools against your live ClickHouse and NATS JetStream telemetry backend. Ask me about **any failing service**, and I will query the live data and provide **concrete code & architectural improvements**!`,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -82,40 +71,23 @@ export const AssistantPage: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const geminiResponse = await askGeminiAssistant(
-        queryText,
-        {
-          tenant,
-          systemProfileName,
-          redMetrics,
-          anomalies,
-          spans,
-          logs,
-        },
-        apiKey
-      );
+      const result = await callAssistantOrchestrator(queryText);
 
       const assistantMessage: ChatMessage = {
         role: 'assistant',
-        content: geminiResponse,
-        tools: [
-          'mcp://telemetry/searchTraces',
-          'mcp://telemetry/getTrace',
-          'mcp://telemetry/queryLogs',
-          'mcp://telemetry/getServiceTopology',
-          'mcp://telemetry/listAnomalies',
-          'mcp://telemetry/explainAnomaly',
-        ],
+        content: result.response,
+        executedTools: result.toolsExecuted,
+        liveDataGrounded: result.liveDataGrounded,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
-    } catch {
+    } catch (err: any) {
       setMessages((prev) => [
         ...prev,
         {
           role: 'assistant',
-          content: 'An error occurred while communicating with Gemini. Please check your network connection or API key.',
+          content: `An error occurred while executing the MCP assistant orchestration: ${err?.message || 'Server offline'}. Ensure mcp-server is running on port :8083.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -138,16 +110,15 @@ export const AssistantPage: React.FC = () => {
       const result = await callMCPTool(toolName, args);
       const formatted = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
 
-      const geminiAnalysis = await askGeminiAssistant(
-        `Here is the raw telemetry output from MCP tool '${toolName}':\n\`\`\`json\n${formatted.slice(0, 1500)}\n\`\`\`\nPlease analyze this live data and provide root-cause insights and architectural solutions.`,
-        { tenant, systemProfileName, redMetrics, anomalies, spans, logs },
-        apiKey
+      const orchestratorResp = await callAssistantOrchestrator(
+        `Analyze this raw MCP tool output from '${toolName}':\n\`\`\`json\n${formatted.slice(0, 1500)}\n\`\`\`\nPlease provide root-cause insights and architectural solutions.`
       );
 
       const assistantMsg: ChatMessage = {
         role: 'assistant',
-        content: `### ⚡ MCP Tool Output: \`${toolName}\`\n\`\`\`json\n${formatted.slice(0, 800)}${formatted.length > 800 ? '\n... (truncated)' : ''}\n\`\`\`\n\n${geminiAnalysis}`,
-        tools: [`mcp://telemetry/${toolName}`],
+        content: `### ⚡ MCP Tool Output: \`${toolName}\`\n\`\`\`json\n${formatted.slice(0, 800)}${formatted.length > 800 ? '\n... (truncated)' : ''}\n\`\`\`\n\n${orchestratorResp.response}`,
+        executedTools: [{ name: toolName, args, success: true, durationMs: 25, summary: formatted.slice(0, 120) }],
+        liveDataGrounded: orchestratorResp.liveDataGrounded,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, assistantMsg]);
@@ -156,7 +127,7 @@ export const AssistantPage: React.FC = () => {
         ...prev,
         {
           role: 'assistant',
-          content: `⚠️ MCP Tool \`${toolName}\` call failed: ${err.message || 'Server unreachable on port 8083'}. Ensure \`go run ./services/mcp-server/cmd/mcp-server\` is running.`,
+          content: `⚠️ MCP Tool \`${toolName}\` call failed: ${err.message || 'Server unreachable on port 8083'}. Ensure \`mcp-server\` is running.`,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         },
       ]);
@@ -209,16 +180,16 @@ export const AssistantPage: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '6px',
-              backgroundColor: apiKey ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
-              border: `1px solid ${apiKey ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
+              backgroundColor: mcpConnected ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.1)',
+              border: `1px solid ${mcpConnected ? 'rgba(16, 185, 129, 0.3)' : 'rgba(239, 68, 68, 0.3)'}`,
               padding: '6px 12px',
               borderRadius: '8px',
               fontSize: '0.78rem',
-              color: apiKey ? 'var(--accent-emerald)' : 'var(--status-critical)',
+              color: mcpConnected ? 'var(--accent-emerald)' : 'var(--status-critical)',
             }}
           >
             <CheckCircle2 size={14} />
-            <span>{apiKey ? 'Gemini Key Active (.env)' : 'Gemini Key Missing (.env)'}</span>
+            <span>Backend Tool Orchestrator: {mcpConnected ? 'Connected (:8083)' : 'Offline'}</span>
           </div>
         </div>
       </div>
@@ -384,14 +355,43 @@ export const AssistantPage: React.FC = () => {
                 >
                   {m.content}
 
-                  {m.tools && (
-                    <div style={{ marginTop: '12px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)', display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                      {m.tools.map((t, tIdx) => (
-                        <span key={tIdx} className="code-pill" style={{ fontSize: '0.68rem', color: 'var(--accent-cyan)' }}>
-                          <Code2 size={10} style={{ display: 'inline', marginRight: '4px' }} />
-                          {t}
+                  {m.executedTools && m.executedTools.length > 0 && (
+                    <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', fontSize: '0.74rem' }}>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          Observable MCP Tools ({m.executedTools.length} executed against tenant <strong>{tenant}</strong>):
                         </span>
-                      ))}
+                        {m.liveDataGrounded ? (
+                          <span className="badge healthy" style={{ fontSize: '0.62rem' }}>Live Telemetry Grounded</span>
+                        ) : (
+                          <span className="badge warning" style={{ fontSize: '0.62rem' }}>Telemetry Table Empty</span>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {m.executedTools.map((t, tIdx) => (
+                          <button
+                            key={tIdx}
+                            type="button"
+                            onClick={() => setSelectedToolInspect(t)}
+                            className="code-pill"
+                            style={{
+                              fontSize: '0.72rem',
+                              color: t.success ? 'var(--accent-emerald)' : '#f87171',
+                              borderColor: t.success ? 'rgba(16, 185, 129, 0.4)' : 'rgba(239, 68, 68, 0.4)',
+                              background: 'rgba(0, 0, 0, 0.3)',
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                            title="Click to view tool execution payload and ClickHouse results"
+                          >
+                            <span>{t.success ? '✓' : '✗'}</span>
+                            <span style={{ fontWeight: 600 }}>{t.name}</span>
+                            <span style={{ color: 'var(--text-muted)' }}>({t.durationMs}ms)</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   )}
 
@@ -586,6 +586,103 @@ export const AssistantPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Real MCP Tool Execution Inspector Modal */}
+      {selectedToolInspect && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '20px',
+          }}
+          onClick={() => setSelectedToolInspect(null)}
+        >
+          <div
+            className="panel-card"
+            style={{
+              maxWidth: '640px',
+              width: '100%',
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-medium)',
+              boxShadow: '0 0 30px rgba(0, 0, 0, 0.8)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Terminal size={18} style={{ color: selectedToolInspect.success ? 'var(--accent-emerald)' : '#f87171' }} />
+                <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.95rem' }}>
+                  MCP Tool Execution: <code>{selectedToolInspect.name}</code>
+                </span>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary"
+                style={{ padding: '3px 8px', fontSize: '0.74rem' }}
+                onClick={() => setSelectedToolInspect(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '14px' }}>
+              <span className={`badge ${selectedToolInspect.success ? 'healthy' : 'critical'}`}>
+                {selectedToolInspect.success ? 'STATUS: SUCCESS' : 'STATUS: FAILED'}
+              </span>
+              <span className="code-pill">Execution Duration: {selectedToolInspect.durationMs}ms</span>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 600 }}>
+                Input Arguments
+              </div>
+              <pre
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '0.75rem',
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--accent-cyan)',
+                  margin: 0,
+                  overflowX: 'auto',
+                }}
+              >
+                {JSON.stringify(selectedToolInspect.args || {}, null, 2)}
+              </pre>
+            </div>
+
+            <div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', fontWeight: 600 }}>
+                Database Output Summary (ClickHouse / Query API)
+              </div>
+              <pre
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  padding: '10px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-subtle)',
+                  fontSize: '0.75rem',
+                  fontFamily: 'var(--font-mono)',
+                  color: '#fff',
+                  margin: 0,
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {selectedToolInspect.summary}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

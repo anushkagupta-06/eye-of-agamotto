@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ShieldAlert,
   Bot,
@@ -9,19 +9,30 @@ import {
   Activity,
   AlertTriangle,
   GitBranch,
-  FileText
+  FileText,
+  CheckCircle2
 } from 'lucide-react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTelemetry } from '../context/TelemetryContext';
 import type { Anomaly } from '../types/telemetry';
 
 export const AnomaliesPage: React.FC = () => {
   const { anomalies, spans, logs } = useTelemetry();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const urlId = searchParams.get('id') || '';
 
   const [selectedAnomalyId, setSelectedAnomalyId] = useState<string>(() => {
-    return anomalies[0]?.id || '';
+    return urlId || anomalies[0]?.id || '';
   });
+
+  useEffect(() => {
+    if (urlId) {
+      setSelectedAnomalyId(urlId);
+    } else if (!selectedAnomalyId && anomalies.length > 0) {
+      setSelectedAnomalyId(anomalies[0].id);
+    }
+  }, [urlId, anomalies]);
 
   const selectedAnomaly: Anomaly | undefined = useMemo(() => {
     return anomalies.find((a) => a.id === selectedAnomalyId) || anomalies[0];
@@ -129,29 +140,36 @@ export const AnomaliesPage: React.FC = () => {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {anomalies.map((anom) => {
-              const isSelected = selectedAnomaly?.id === anom.id;
-              return (
-                <div
-                  key={anom.id}
-                  onClick={() => setSelectedAnomalyId(anom.id)}
-                  style={{
-                    padding: '14px 16px',
-                    borderBottom: '1px solid var(--border-subtle)',
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
-                    borderLeft: isSelected ? '3px solid var(--status-critical)' : '3px solid transparent',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '8px' }}>
-                    <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {anom.serviceName}
-                    </span>
-                    <span className="badge critical" style={{ fontSize: '0.65rem', fontWeight: 700, flexShrink: 0 }}>
-                      +{Math.round(((anom.observedValue - anom.baselineValue) / anom.baselineValue) * 100)}% SPIKE
-                    </span>
-                  </div>
+            {anomalies.length === 0 ? (
+              <div style={{ padding: '36px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                <CheckCircle2 size={24} style={{ margin: '0 auto 8px', color: 'var(--accent-emerald)' }} />
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Zero Anomalies Detected</div>
+                <div style={{ fontSize: '0.74rem', marginTop: '4px' }}>All services operating within normal baseline limits.</div>
+              </div>
+            ) : (
+              anomalies.map((anom) => {
+                const isSelected = selectedAnomaly?.id === anom.id;
+                return (
+                  <div
+                    key={anom.id}
+                    onClick={() => setSelectedAnomalyId(anom.id)}
+                    style={{
+                      padding: '14px 16px',
+                      borderBottom: '1px solid var(--border-subtle)',
+                      cursor: 'pointer',
+                      backgroundColor: isSelected ? 'rgba(239, 68, 68, 0.08)' : 'transparent',
+                      borderLeft: isSelected ? '3px solid var(--status-critical)' : '3px solid transparent',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px', gap: '8px' }}>
+                      <span style={{ fontWeight: 600, color: '#fff', fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {anom.serviceName}
+                      </span>
+                      <span className="badge critical" style={{ fontSize: '0.65rem', fontWeight: 700, flexShrink: 0 }}>
+                        +{Math.round(((anom.observedValue - anom.baselineValue) / anom.baselineValue) * 100)}% SPIKE
+                      </span>
+                    </div>
 
                   <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '6px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {anom.metric}
@@ -167,7 +185,7 @@ export const AnomaliesPage: React.FC = () => {
                   </div>
                 </div>
               );
-            })}
+            }))}
           </div>
         </div>
 

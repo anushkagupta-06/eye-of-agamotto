@@ -1,17 +1,23 @@
 import React from 'react';
 import {
   Search,
-  Boxes
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import { useTelemetry } from '../../context/TelemetryContext';
-import type { SystemProfileType } from '../../api/telemetryClient';
 
 export const Header: React.FC = () => {
   const {
-    systemProfile,
-    setSystemProfile,
+    tenant,
+    timeRange,
+    setTimeRange,
     searchQuery,
     setSearchQuery,
+    refreshData,
+    isLoading,
+    isStale,
+    error,
+    mockMode,
   } = useTelemetry();
 
   return (
@@ -29,14 +35,13 @@ export const Header: React.FC = () => {
       </div>
 
       {/* Header Actions */}
-      <div className="header-actions">
-        {/* System Architecture Domain Switcher */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'var(--bg-card)', padding: '3px 8px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-          <Boxes size={14} style={{ color: 'var(--accent-purple)' }} />
-          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>System:</span>
+      <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        {/* Time Range Selector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'var(--bg-card)', padding: '4px 8px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>Range:</span>
           <select
-            value={systemProfile}
-            onChange={(e) => setSystemProfile(e.target.value as SystemProfileType)}
+            value={timeRange}
+            onChange={(e) => setTimeRange(e.target.value)}
             style={{
               background: 'transparent',
               border: 'none',
@@ -46,14 +51,72 @@ export const Header: React.FC = () => {
               fontWeight: 600,
               cursor: 'pointer',
             }}
-            title="Switch microservices architecture profile"
           >
-            <option value="GENERAL" style={{ background: '#10141e' }}>General Cloud Microservices</option>
-            <option value="ECOMMERCE" style={{ background: '#10141e' }}>E-Commerce & Digital Retail</option>
-            <option value="FINTECH" style={{ background: '#10141e' }}>FinTech & Trading Engine</option>
-            <option value="HEALTHCARE" style={{ background: '#10141e' }}>Healthcare & Diagnostics</option>
+            <option value="15m" style={{ background: '#10141e' }}>Last 15 minutes</option>
+            <option value="1h" style={{ background: '#10141e' }}>Last 1 hour</option>
+            <option value="24h" style={{ background: '#10141e' }}>Last 24 hours</option>
+            <option value="7d" style={{ background: '#10141e' }}>Last 7 days</option>
           </select>
         </div>
+
+        {/* Live / Mock Mode Status Pill */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: mockMode ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+            padding: '5px 10px',
+            borderRadius: '8px',
+            border: `1px solid ${mockMode ? 'var(--accent-amber)' : 'var(--accent-emerald)'}`,
+          }}
+        >
+          <span
+            style={{
+              width: '7px',
+              height: '7px',
+              borderRadius: '50%',
+              backgroundColor: mockMode ? 'var(--accent-amber)' : 'var(--accent-emerald)',
+              boxShadow: `0 0 6px ${mockMode ? 'var(--accent-amber)' : 'var(--accent-emerald)'}`,
+            }}
+          />
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: mockMode ? 'var(--accent-amber)' : 'var(--accent-emerald)' }}>
+            {mockMode ? 'Mock Mode' : `Live API (${tenant})`}
+          </span>
+        </div>
+
+        {/* Error / Stale Notice if any */}
+        {error && !mockMode && (
+          <div
+            title={error}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              background: 'rgba(239, 68, 68, 0.1)',
+              padding: '4px 8px',
+              borderRadius: '6px',
+              border: '1px solid var(--accent-red)',
+              fontSize: '0.72rem',
+              color: 'var(--accent-red)',
+            }}
+          >
+            <AlertCircle size={13} />
+            <span>{isStale ? 'Stale Data' : 'API Offline'}</span>
+          </div>
+        )}
+
+        {/* Manual Refresh Button */}
+        <button
+          onClick={refreshData}
+          disabled={isLoading}
+          className="btn-secondary"
+          title="Refresh telemetry"
+          style={{ padding: '6px 10px', fontSize: '0.74rem', display: 'flex', alignItems: 'center', gap: '5px' }}
+        >
+          <RefreshCw size={13} className={isLoading ? 'animate-spin' : ''} />
+          <span>Refresh</span>
+        </button>
       </div>
     </header>
   );

@@ -190,7 +190,7 @@ func (h *MCPHandler) HandleRequest(ctx context.Context, req *protocol.JSONRPCReq
 			}
 		}
 
-		resultText, err := h.executeTool(ctx, params.Name, params.Arguments)
+		resultText, err := h.ExecuteTool(ctx, params.Name, params.Arguments)
 		if err != nil {
 			return &protocol.JSONRPCResponse{
 				JSONRPC: "2.0",
@@ -226,8 +226,8 @@ func (h *MCPHandler) HandleRequest(ctx context.Context, req *protocol.JSONRPCReq
 	}
 }
 
-// executeTool executes one of the 6 tools by delegating to QueryAPI.
-func (h *MCPHandler) executeTool(ctx context.Context, toolName string, rawArgs json.RawMessage) (string, error) {
+// ExecuteTool executes one of the 6 tools by delegating to QueryAPI.
+func (h *MCPHandler) ExecuteTool(ctx context.Context, toolName string, rawArgs json.RawMessage) (string, error) {
 	var args map[string]any
 	if len(rawArgs) > 0 {
 		_ = json.Unmarshal(rawArgs, &args)
