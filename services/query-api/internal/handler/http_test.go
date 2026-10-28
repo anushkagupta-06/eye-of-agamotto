@@ -94,6 +94,10 @@ func (m *mockQueryAPI) GetTopology(ctx context.Context, tenantID string, from, t
 	}, nil
 }
 
+func (m *mockQueryAPI) CheckHealth(ctx context.Context) (map[string]string, error) {
+	return map[string]string{"clickhouse": "UP", "nats": "UP"}, nil
+}
+
 func (m *mockQueryAPI) GetREDMetrics(ctx context.Context, tenantID string) ([]*model.REDMetric, error) {
 	return []*model.REDMetric{
 		{
@@ -112,7 +116,7 @@ func (m *mockQueryAPI) GetREDMetrics(ctx context.Context, tenantID string) ([]*m
 
 func TestHTTPHandlerRoutes(t *testing.T) {
 	mockSvc := &mockQueryAPI{}
-	h := handler.NewHTTPHandler(mockSvc)
+	h := handler.NewHTTPHandler(mockSvc, "demo")
 
 	mux := http.NewServeMux()
 	h.RegisterRoutes(mux)
@@ -123,6 +127,14 @@ func TestHTTPHandlerRoutes(t *testing.T) {
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+
+	// 1b. Ready check
+	reqReady := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rrReady := httptest.NewRecorder()
+	mux.ServeHTTP(rrReady, reqReady)
+	if rrReady.Code != http.StatusOK {
+		t.Fatalf("expected 200 for readyz, got %d", rrReady.Code)
 	}
 
 	// 2. GetTrace

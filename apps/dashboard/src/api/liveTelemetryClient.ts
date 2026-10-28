@@ -1,34 +1,33 @@
 import type { Anomaly, LogRecord, REDMetric, Span, ServiceEdge } from '../types/telemetry';
-import { SYSTEM_PROFILES, type SystemProfileType } from './telemetryClient';
 
 const QUERY_API_BASE = '/api/query/api/v1';
 
 /**
- * Fetch real-time RED Metrics from QueryAPI / ClickHouse, falling back to profile defaults.
+ * Fetch real-time RED Metrics from QueryAPI / ClickHouse.
  */
-export async function fetchLiveREDMetrics(tenant: string, profile: SystemProfileType): Promise<REDMetric[]> {
+export async function fetchLiveREDMetrics(): Promise<REDMetric[]> {
   try {
-    const res = await fetch(`${QUERY_API_BASE}/metrics/red?tenant=${encodeURIComponent(tenant)}`, {
+    const res = await fetch(`${QUERY_API_BASE}/metrics/red`, {
       headers: { 'Accept': 'application/json' },
     });
     if (res.ok) {
       const json = await res.json();
-      if (Array.isArray(json?.data) && json.data.length > 0) {
+      if (Array.isArray(json?.data)) {
         return json.data;
       }
     }
   } catch (err) {
-    // Backend offline or unreachable; fall back gracefully
+    // Backend offline or unreachable
   }
-  return SYSTEM_PROFILES[profile]?.redMetrics || [];
+  return [];
 }
 
 /**
  * Fetch real-time Traces from QueryAPI / ClickHouse.
  */
-export async function fetchLiveTraces(tenant: string, profile: SystemProfileType): Promise<Span[]> {
+export async function fetchLiveTraces(): Promise<Span[]> {
   try {
-    const res = await fetch(`${QUERY_API_BASE}/traces?tenant=${encodeURIComponent(tenant)}&limit=50`, {
+    const res = await fetch(`${QUERY_API_BASE}/traces?limit=50`, {
       headers: { 'Accept': 'application/json' },
     });
     if (res.ok) {
@@ -36,9 +35,9 @@ export async function fetchLiveTraces(tenant: string, profile: SystemProfileType
       if (Array.isArray(json?.data) && json.data.length > 0) {
         // Fetch detailed spans for the most active traces
         const spansList: Span[] = [];
-        for (const summary of json.data.slice(0, 5)) {
+        for (const summary of json.data.slice(0, 10)) {
           try {
-            const traceRes = await fetch(`${QUERY_API_BASE}/traces/${summary.traceId}?tenant=${encodeURIComponent(tenant)}`);
+            const traceRes = await fetch(`${QUERY_API_BASE}/traces/${summary.traceId}`);
             if (traceRes.ok) {
               const traceData = await traceRes.json();
               if (Array.isArray(traceData?.spans)) {
@@ -49,68 +48,67 @@ export async function fetchLiveTraces(tenant: string, profile: SystemProfileType
             // ignore individual trace failure
           }
         }
-        if (spansList.length > 0) {
-          return spansList;
-        }
+        return spansList;
       }
+      return [];
     }
   } catch (err) {
-    // Backend offline; fall back gracefully
+    // Backend offline
   }
-  return SYSTEM_PROFILES[profile]?.spans || [];
+  return [];
 }
 
 /**
  * Fetch real-time Logs from QueryAPI / ClickHouse.
  */
-export async function fetchLiveLogs(tenant: string, profile: SystemProfileType): Promise<LogRecord[]> {
+export async function fetchLiveLogs(): Promise<LogRecord[]> {
   try {
-    const res = await fetch(`${QUERY_API_BASE}/logs?tenant=${encodeURIComponent(tenant)}&limit=100`, {
+    const res = await fetch(`${QUERY_API_BASE}/logs?limit=100`, {
       headers: { 'Accept': 'application/json' },
     });
     if (res.ok) {
       const json = await res.json();
-      if (Array.isArray(json?.data) && json.data.length > 0) {
+      if (Array.isArray(json?.data)) {
         return json.data;
       }
     }
   } catch (err) {
-    // Backend offline; fall back gracefully
+    // Backend offline
   }
-  return SYSTEM_PROFILES[profile]?.logs || [];
+  return [];
 }
 
 /**
  * Fetch real-time Anomalies from QueryAPI / ClickHouse.
  */
-export async function fetchLiveAnomalies(tenant: string, profile: SystemProfileType): Promise<Anomaly[]> {
+export async function fetchLiveAnomalies(): Promise<Anomaly[]> {
   try {
-    const res = await fetch(`${QUERY_API_BASE}/anomalies?tenant=${encodeURIComponent(tenant)}&range=24h`, {
+    const res = await fetch(`${QUERY_API_BASE}/anomalies?range=24h`, {
       headers: { 'Accept': 'application/json' },
     });
     if (res.ok) {
       const json = await res.json();
-      if (Array.isArray(json?.data) && json.data.length > 0) {
+      if (Array.isArray(json?.data)) {
         return json.data;
       }
     }
   } catch (err) {
-    // Backend offline; fall back gracefully
+    // Backend offline
   }
-  return SYSTEM_PROFILES[profile]?.anomalies || [];
+  return [];
 }
 
 /**
  * Fetch real-time Service Topology from QueryAPI.
  */
-export async function fetchLiveTopology(tenant: string): Promise<ServiceEdge[]> {
+export async function fetchLiveTopology(): Promise<ServiceEdge[]> {
   try {
-    const res = await fetch(`${QUERY_API_BASE}/topology?tenant=${encodeURIComponent(tenant)}`, {
+    const res = await fetch(`${QUERY_API_BASE}/topology`, {
       headers: { 'Accept': 'application/json' },
     });
     if (res.ok) {
       const json = await res.json();
-      if (Array.isArray(json?.edges) && json.edges.length > 0) {
+      if (Array.isArray(json?.edges)) {
         return json.edges.map((e: any) => ({
           caller: e.caller,
           callee: e.callee,

@@ -45,70 +45,57 @@ export const LogsPage: React.FC = () => {
   const [expandedLogIdx, setExpandedLogIdx] = useState<number | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
-  // Live tail simulation: appends fresh log periodically if live tail is active
+  // Real-time SSE Live Tail connected directly to Query API / NATS JetStream
   useEffect(() => {
     if (!isLiveTail) return;
-    const interval = setInterval(() => {
-      const services = ['checkout-service', 'payment-gateway', 'inventory-service', 'auth-service', 'ingestion-gateway'];
-      const randomService = services[Math.floor(Math.random() * services.length)];
-      const severities: LogRecord['severityText'][] = ['INFO', 'INFO', 'DEBUG', 'WARN', 'ERROR'];
-      const randomSeverity = severities[Math.floor(Math.random() * severities.length)];
 
-      const sampleBodies: Record<LogRecord['severityText'], string[]> = {
-        INFO: [
-          `Batch ingestion committed: published 16 records to stream TELEMETRY`,
-          `Cache hit on redis cluster replica (latency: 120us)`,
-          `HTTP request completed with status 200 OK`,
-          `Refreshed tenant auth cache for demo tenant`,
-        ],
-        DEBUG: [
-          `Evaluating bloom filter on table observability.logs`,
-          `NATS JetStream ping acknowledgment received (roundtrip: 0.3ms)`,
-          `Connection pool reused for worker thread #14`,
-        ],
-        WARN: [
-          `Upstream latency approaching circuit breaker threshold: 190ms`,
-          `Worker queue depth elevated: 86 pending tasks`,
-          `Rate limit token bucket 80% consumed for tenant demo`,
-        ],
-        ERROR: [
-          `Downstream call failed: connection timeout after 200ms`,
-          `HTTP 504 Gateway Timeout from external payment processor`,
-          `PostgreSQL query execution exceeded 500ms deadline`,
-        ],
-        FATAL: [
-          `Fatal panic in worker loop: unhandled nil pointer exception`,
-        ],
-      };
+    const params = new URLSearchParams();
+    if (selectedService !== 'ALL') {
+      params.append('service', selectedService);
+    }
+    if (severityFilter !== 'ALL') {
+      params.append('severity', severityFilter);
+    }
+    if (searchTerm.trim() && !isRegexMode) {
+      params.append('query', searchTerm.trim());
+    }
 
-      const messages = sampleBodies[randomSeverity];
-      const randomBody = messages[Math.floor(Math.random() * messages.length)];
-      const hasTrace = Math.random() > 0.4;
+    const queryStr = params.toString();
+    const url = `/api/query/api/v1/logs/tail${queryStr ? '?' + queryStr : ''}`;
+    const eventSource = new EventSource(url);
 
-      const newLog: LogRecord = {
-        tenantId: 'demo',
-        timestamp: new Date().toISOString(),
-        serviceName: randomService,
-        severityText: randomSeverity,
-        severityNumber: randomSeverity === 'ERROR' ? 17 : randomSeverity === 'WARN' ? 13 : 9,
-        body: randomBody,
-        traceId: hasTrace ? '5b8efff798038103d269b633813fc60c' : '',
-        spanId: hasTrace ? 'eee19b7ec3c1b174' : '',
-        attributes: {
-          runtime: 'production',
-          worker_id: `wrk_${Math.floor(Math.random() * 100)}`,
-        },
-        resourceAttributes: {
-          'service.name': randomService,
-          'host.name': 'prod-node-01',
-        },
-      };
+    eventSource.onmessage = (event) => {
+      try {
+        const record = JSON.parse(event.data);
+        if (record && record.body) {
+          const incomingLog: LogRecord = {
+            tenantId: 'demo',
+            timestamp: record.timestamp || new Date().toISOString(),
+            serviceName: record.serviceName || 'unknown_service',
+            severityText: (record.severity || 'INFO').toUpperCase() as LogRecord['severityText'],
+            severityNumber: record.severityNumber || 9,
+            body: record.body,
+            traceId: record.traceId || '',
+            spanId: record.spanId || '',
+            attributes: record.attributes || {},
+            resourceAttributes: record.resourceAttributes || {},
+          };
 
-      setStreamedLogs((prev) => [newLog, ...prev.slice(0, 50)]);
-    }, 4000);
+          setStreamedLogs((prev) => [incomingLog, ...prev.slice(0, 99)]);
+        }
+      } catch (err) {
+        console.warn('Failed to parse incoming SSE log record:', err);
+      }
+    };
 
-    return () => clearInterval(interval);
-  }, [isLiveTail]);
+    eventSource.onerror = (err) => {
+      console.warn('Live log tail SSE connection closed or offline:', err);
+    };
+
+    return () => {
+      eventSource.close();
+    };
+  }, [isLiveTail, selectedService, severityFilter, searchTerm, isRegexMode]);
 
   // Filter logs logic
   const filteredLogs = logs.filter((log) => {

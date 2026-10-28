@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Activity, ArrowRight, Server, ShieldCheck, Database, Network } from 'lucide-react';
 import { useTelemetry } from '../context/TelemetryContext';
+import { fetchLiveTopology } from '../api/liveTelemetryClient';
 
 export interface TopologyEdge {
   caller: string;
@@ -11,10 +12,30 @@ export interface TopologyEdge {
 }
 
 export const TopologyPage: React.FC = () => {
-  const { systemProfile, systemProfileName, redMetrics, spans } = useTelemetry();
+  const { systemProfileName, redMetrics, spans } = useTelemetry();
+  const [liveEdges, setLiveEdges] = useState<TopologyEdge[]>([]);
 
-  // Derive dynamic edges from live spans and active RED metrics
+  useEffect(() => {
+    let mounted = true;
+    fetchLiveTopology().then((edges) => {
+      if (mounted) setLiveEdges(edges);
+    });
+    const interval = setInterval(() => {
+      fetchLiveTopology().then((edges) => {
+        if (mounted) setLiveEdges(edges);
+      });
+    }, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Derive dynamic edges from live backend edges or active spans
   const getDynamicEdges = (): TopologyEdge[] => {
+    if (liveEdges.length > 0) {
+      return liveEdges;
+    }
     const derivedEdges: TopologyEdge[] = [];
     const spanMap = new Map<string, string>(); // spanId -> serviceName
 
@@ -34,8 +55,8 @@ export const TopologyPage: React.FC = () => {
             derivedEdges.push({
               caller,
               callee,
-              calls: calleeMetric?.callsPerMin || 14500,
-              errors: calleeMetric?.errorCount || (s.statusCode === 'ERROR' ? 42 : 0),
+              calls: calleeMetric?.callsPerMin || 1,
+              errors: calleeMetric?.errorCount || (s.statusCode === 'ERROR' ? 1 : 0),
               p95LatencyMs: calleeMetric?.p95Ms || Math.round(s.durationNs / 1000000),
             });
           }
@@ -43,42 +64,7 @@ export const TopologyPage: React.FC = () => {
       }
     });
 
-    // If spans yielded edges, return them
-    if (derivedEdges.length > 0) {
-      return derivedEdges;
-    }
-
-    // Baseline domain profile edges
-    switch (systemProfile) {
-      case 'GENERAL':
-        return [
-          { caller: 'api-gateway', callee: 'auth-service', calls: 42100, errors: 84, p95LatencyMs: 18 },
-          { caller: 'api-gateway', callee: 'user-service', calls: 28500, errors: 57, p95LatencyMs: 28 },
-          { caller: 'api-gateway', callee: 'notification-worker', calls: 14200, errors: 497, p95LatencyMs: 320 },
-          { caller: 'api-gateway', callee: 'billing-service', calls: 8900, errors: 115, p95LatencyMs: 118 },
-        ];
-      case 'FINTECH':
-        return [
-          { caller: 'order-router', callee: 'risk-engine', calls: 98000, errors: 98, p95LatencyMs: 8 },
-          { caller: 'order-router', callee: 'matching-engine', calls: 85000, errors: 2550, p95LatencyMs: 180 },
-          { caller: 'matching-engine', callee: 'ledger-service', calls: 45000, errors: 450, p95LatencyMs: 65 },
-          { caller: 'market-data-feed', callee: 'order-router', calls: 340000, errors: 34, p95LatencyMs: 2 },
-        ];
-      case 'HEALTHCARE':
-        return [
-          { caller: 'telehealth-gateway', callee: 'patient-records-api', calls: 29000, errors: 58, p95LatencyMs: 55 },
-          { caller: 'telehealth-gateway', callee: 'lab-diagnostic-engine', calls: 6200, errors: 248, p95LatencyMs: 410 },
-          { caller: 'icu-vital-monitor', callee: 'patient-records-api', calls: 140000, errors: 14, p95LatencyMs: 6 },
-        ];
-      case 'ECOMMERCE':
-      default:
-        return [
-          { caller: 'ingress-gateway', callee: 'checkout-service', calls: 14200, errors: 142, p95LatencyMs: 110 },
-          { caller: 'checkout-service', callee: 'payment-gateway', calls: 9850, errors: 394, p95LatencyMs: 310 },
-          { caller: 'checkout-service', callee: 'inventory-service', calls: 14200, errors: 12, p95LatencyMs: 22 },
-          { caller: 'ingress-gateway', callee: 'auth-service', calls: 21000, errors: 42, p95LatencyMs: 34 },
-        ];
-    }
+    return derivedEdges;
   };
 
   const edges = getDynamicEdges();

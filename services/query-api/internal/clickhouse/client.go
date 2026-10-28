@@ -44,6 +44,14 @@ func Open(ctx context.Context, cfg *config.Config) (*Client, error) {
 	return &Client{conn: conn}, nil
 }
 
+// Ping checks if ClickHouse is reachable and alive.
+func (c *Client) Ping(ctx context.Context) error {
+	if c == nil || c.conn == nil {
+		return fmt.Errorf("clickhouse connection is not initialized")
+	}
+	return c.conn.Ping(ctx)
+}
+
 // Conn returns the raw ClickHouse driver connection for queries.
 func (c *Client) Conn() driver.Conn {
 	return c.conn

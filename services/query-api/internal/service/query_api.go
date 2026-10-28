@@ -15,6 +15,7 @@ import (
 
 // QueryAPI defines the contract for querying traces, logs, anomalies, and service topology.
 type QueryAPI interface {
+	CheckHealth(ctx context.Context) (map[string]string, error)
 	GetTrace(ctx context.Context, tenantID, traceID string) (*model.Trace, error)
 	SearchTraces(ctx context.Context, tenantID string, filters model.TraceFilters) ([]*model.TraceSummary, error)
 	SearchLogs(ctx context.Context, tenantID string, query model.LogQuery) ([]*model.LogRecord, error)
@@ -34,6 +35,7 @@ type queryAPIService struct {
 // LogTailer provides streaming for live logs.
 type LogTailer interface {
 	Tail(ctx context.Context, tenantID string, filters model.LogTailFilters) (<-chan *model.LogRecord, error)
+	IsConnected() bool
 }
 
 // NewQueryAPI initializes a new QueryAPI service.
@@ -42,6 +44,38 @@ func NewQueryAPI(client *clickhouse.Client, tailer LogTailer) QueryAPI {
 		client: client,
 		tailer: tailer,
 	}
+}
+
+// CheckHealth probes all service dependencies (ClickHouse and NATS).
+func (s *queryAPIService) CheckHealth(ctx context.Context) (map[string]string, error) {
+	status := make(map[string]string)
+	var errs []string
+
+	// 1. ClickHouse check
+	if s.client == nil {
+		status["clickhouse"] = "DOWN: client not initialized"
+		errs = append(errs, "clickhouse client uninitialized")
+	} else if err := s.client.Ping(ctx); err != nil {
+		status["clickhouse"] = fmt.Sprintf("DOWN: %v", err)
+		errs = append(errs, fmt.Sprintf("clickhouse ping: %v", err))
+	} else {
+		status["clickhouse"] = "UP"
+	}
+
+	// 2. NATS JetStream check
+	if s.tailer == nil {
+		status["nats"] = "DISABLED"
+	} else if s.tailer.IsConnected() {
+		status["nats"] = "UP"
+	} else {
+		status["nats"] = "DOWN"
+		errs = append(errs, "nats disconnected")
+	}
+
+	if len(errs) > 0 {
+		return status, fmt.Errorf("dependency failure: %s", strings.Join(errs, "; "))
+	}
+	return status, nil
 }
 
 // GetTrace retrieves all spans for a specific traceId and reconstructs the call graph & critical path.
@@ -168,8 +202,8 @@ func (s *queryAPIService) SearchTraces(ctx context.Context, tenantID string, f m
 
 	sb.WriteString(`
 		SELECT trace_id,
-		       any(service_name) AS root_service,
-		       any(name) AS root_operation,
+		       argMin(service_name, tuple(if(parent_span_id = '', 0, 1), start_time)) AS root_service,
+		       argMin(name, tuple(if(parent_span_id = '', 0, 1), start_time)) AS root_operation,
 		       min(start_time) AS start_time,
 		       max(duration_ns) AS duration_ns,
 		       count() AS span_count,
@@ -280,9 +314,13 @@ func (s *queryAPIService) SearchLogs(ctx context.Context, tenantID string, q mod
 		args = append(args, q.SpanID)
 	}
 	if q.Query != "" {
-		// Use ClickHouse tokenbf_v1 indexed whole-word search for high throughput
-		sb.WriteString(" AND hasToken(body, ?)")
-		args = append(args, q.Query)
+		if strings.ContainsAny(q.Query, " %_") {
+			sb.WriteString(" AND ilike(body, ?)")
+			args = append(args, "%"+q.Query+"%")
+		} else {
+			sb.WriteString(" AND (hasToken(body, ?) OR ilike(body, ?))")
+			args = append(args, q.Query, "%"+q.Query+"%")
+		}
 	}
 
 	for k, v := range q.Attributes {
@@ -544,8 +582,7 @@ func (s *queryAPIService) GetTopology(ctx context.Context, tenantID string, from
 
 	rows, err := s.client.Conn().Query(ctx, query, tenantID, from, to)
 	if err != nil {
-		// Fallback to empty topology if no edges yet
-		return &model.TopologyGraph{Edges: []*model.ServiceEdge{}, Services: []string{}}, nil
+		return nil, fmt.Errorf("failed to query service topology: %w", err)
 	}
 	defer rows.Close()
 
@@ -688,7 +725,7 @@ func (s *queryAPIService) GetREDMetrics(ctx context.Context, tenantID string) ([
 
 	sRows, err := conn.Query(ctx, spanQuery, tenantID)
 	if err != nil {
-		return []*model.REDMetric{}, nil
+		return nil, fmt.Errorf("failed to query span RED metrics: %w", err)
 	}
 	defer sRows.Close()
 

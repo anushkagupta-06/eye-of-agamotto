@@ -14,17 +14,22 @@ import (
 
 // HTTPHandler exposes REST and Server-Sent Events endpoints for QueryAPI.
 type HTTPHandler struct {
-	svc service.QueryAPI
+	svc      service.QueryAPI
+	tenantID string
 }
 
-// NewHTTPHandler creates a new HTTPHandler.
-func NewHTTPHandler(svc service.QueryAPI) *HTTPHandler {
-	return &HTTPHandler{svc: svc}
+// NewHTTPHandler creates a new HTTPHandler with a server-enforced tenant ID.
+func NewHTTPHandler(svc service.QueryAPI, tenantID string) *HTTPHandler {
+	if strings.TrimSpace(tenantID) == "" {
+		tenantID = "demo"
+	}
+	return &HTTPHandler{svc: svc, tenantID: strings.TrimSpace(tenantID)}
 }
 
 // RegisterRoutes registers endpoints onto an http.ServeMux.
 func (h *HTTPHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", h.handleHealth)
+	mux.HandleFunc("/readyz", h.handleReady)
 	mux.HandleFunc("/api/v1/traces/", h.handleGetTrace)
 	mux.HandleFunc("/api/v1/traces", h.handleSearchTraces)
 	mux.HandleFunc("/api/v1/logs", h.handleSearchLogs)
@@ -36,8 +41,30 @@ func (h *HTTPHandler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *HTTPHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_, _ = w.Write([]byte(`{"status":"UP"}`))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":  "UP",
+		"service": "query-api",
+		"tenant":  h.tenantID,
+	})
+}
+
+func (h *HTTPHandler) handleReady(w http.ResponseWriter, r *http.Request) {
+	deps, err := h.svc.CheckHealth(r.Context())
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"status":       "UNAVAILABLE",
+			"error":        err.Error(),
+			"dependencies": deps,
+			"tenant":       h.tenantID,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status":       "READY",
+		"dependencies": deps,
+		"tenant":       h.tenantID,
+	})
 }
 
 // handleGetTrace returns a single reconstructed trace DAG with critical path.
@@ -54,9 +81,8 @@ func (h *HTTPHandler) handleGetTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	traceID := pathParts[3]
-	tenantID := getTenant(r)
 
-	trace, err := h.svc.GetTrace(r.Context(), tenantID, traceID)
+	trace, err := h.svc.GetTrace(r.Context(), h.tenantID, traceID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -91,10 +117,13 @@ func (h *HTTPHandler) handleSearchTraces(w http.ResponseWriter, r *http.Request)
 	f.From = parseTime(q.Get("from"), time.Now().Add(-15*time.Minute))
 	f.To = parseTime(q.Get("to"), time.Now())
 
-	traces, err := h.svc.SearchTraces(r.Context(), getTenant(r), f)
+	traces, err := h.svc.SearchTraces(r.Context(), h.tenantID, f)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if traces == nil {
+		traces = []*model.TraceSummary{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -123,10 +152,13 @@ func (h *HTTPHandler) handleSearchLogs(w http.ResponseWriter, r *http.Request) {
 		To:       parseTime(q.Get("to"), time.Now()),
 	}
 
-	logs, err := h.svc.SearchLogs(r.Context(), getTenant(r), logQuery)
+	logs, err := h.svc.SearchLogs(r.Context(), h.tenantID, logQuery)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if logs == nil {
+		logs = []*model.LogRecord{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -156,7 +188,7 @@ func (h *HTTPHandler) handleTailLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 
-	ch, err := h.svc.TailLogs(r.Context(), getTenant(r), f)
+	ch, err := h.svc.TailLogs(r.Context(), h.tenantID, f)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -202,10 +234,13 @@ func (h *HTTPHandler) handleGetAnomalies(w http.ResponseWriter, r *http.Request)
 		Limit: parseInt(q.Get("limit"), 50),
 	}
 
-	anomalies, err := h.svc.GetAnomalies(r.Context(), getTenant(r), anomRange)
+	anomalies, err := h.svc.GetAnomalies(r.Context(), h.tenantID, anomRange)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if anomalies == nil {
+		anomalies = []*model.Anomaly{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -229,7 +264,7 @@ func (h *HTTPHandler) handleExplainAnomaly(w http.ResponseWriter, r *http.Reques
 	}
 	anomalyID := pathParts[3]
 
-	anomaly, err := h.svc.ExplainAnomaly(r.Context(), getTenant(r), anomalyID)
+	anomaly, err := h.svc.ExplainAnomaly(r.Context(), h.tenantID, anomalyID)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": err.Error()})
 		return
@@ -250,7 +285,7 @@ func (h *HTTPHandler) handleGetTopology(w http.ResponseWriter, r *http.Request) 
 	from := parseTime(q.Get("from"), time.Now().Add(-15*time.Minute))
 	to := parseTime(q.Get("to"), time.Now())
 
-	graph, err := h.svc.GetTopology(r.Context(), getTenant(r), from, to)
+	graph, err := h.svc.GetTopology(r.Context(), h.tenantID, from, to)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
@@ -267,10 +302,13 @@ func (h *HTTPHandler) handleGetREDMetrics(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	metrics, err := h.svc.GetREDMetrics(r.Context(), getTenant(r))
+	metrics, err := h.svc.GetREDMetrics(r.Context(), h.tenantID)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
+	}
+	if metrics == nil {
+		metrics = []*model.REDMetric{}
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{

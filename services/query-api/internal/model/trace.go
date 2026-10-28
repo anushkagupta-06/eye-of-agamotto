@@ -33,6 +33,17 @@ func (t *Trace) BuildTree() *SpanNode {
 		return nil
 	}
 
+	// Deduplicate spans by spanID in case duplicate rows were scanned
+	seen := make(map[string]bool, len(t.Spans))
+	dedup := make([]*Span, 0, len(t.Spans))
+	for _, s := range t.Spans {
+		if !seen[s.SpanID] {
+			seen[s.SpanID] = true
+			dedup = append(dedup, s)
+		}
+	}
+	t.Spans = dedup
+
 	nodes := make(map[string]*SpanNode, len(t.Spans))
 	for _, span := range t.Spans {
 		nodes[span.SpanID] = &SpanNode{

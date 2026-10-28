@@ -154,32 +154,32 @@ The following items from the design specification are scheduled for upcoming dev
 - Go 1.22+
 - Node.js 20+ and npm
 
-### 1. Start Infrastructure (ClickHouse & NATS JetStream)
+### 1. Start Infrastructure & Query API Platform Service
 ```bash
 # Copy and configure environment variables
 cp .env.example .env
 
-# Launch ClickHouse and NATS JetStream with healthchecks
+# Launch ClickHouse, NATS JetStream, and Query API with healthchecks
 docker compose -f docker-compose.infra.yml up -d
+
+# Verify Query API readiness and dependency connectivity
+curl -s http://127.0.0.1:8082/readyz
+# Response: {"status":"READY","dependencies":{"clickhouse":"UP","nats":"UP"},"tenant":"demo"}
 ```
 
-### 2. Run Backend Services
+### 2. Run Telemetry Processing & Ingestion Services
 ```bash
-# Run Ingestion Gateway
+# Run Ingestion Gateway (receives OTLP traces & logs on 4317/4318)
 cd services/ingestion-gateway
 go run ./cmd/gateway
 
-# Run Writer Service
+# Run Writer Service (bulk inserts telemetry to ClickHouse)
 cd services/writer
 go run ./cmd/writer
 
-# Run Stream Processor
+# Run Stream Processor (derives topology edges & RED metrics)
 cd services/stream-processor
 go run .
-
-# Run Query API
-cd services/query-api
-go run ./cmd/query-api
 ```
 
 ### 3. Run MCP Server (Optional, for AI integration)

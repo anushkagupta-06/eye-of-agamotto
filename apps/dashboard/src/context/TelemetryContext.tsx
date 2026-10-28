@@ -44,15 +44,9 @@ interface TelemetryContextType {
 const TelemetryContext = createContext<TelemetryContextType | undefined>(undefined);
 
 export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [tenant, setTenant] = useState<string>(() => {
-    return localStorage.getItem('eoa_auth_tenant') || 'demo';
-  });
-  const [apiKey, setApiKey] = useState<string>(() => {
-    return localStorage.getItem('eoa_auth_key') || 'eoa_cffdedbba2a3d4f0ecb4706923ae02d5d4b2ac1a0c03ff44';
-  });
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('eoa_is_authenticated') === 'true';
-  });
+  const [tenant] = useState<string>('demo');
+  const [apiKey] = useState<string>('eoa_cffdedbba2a3d4f0ecb4706923ae02d5d4b2ac1a0c03ff44');
+  const [isAuthenticated] = useState<boolean>(true);
 
   const [systemProfile, setSystemProfileState] = useState<SystemProfileType>(() => {
     return (localStorage.getItem('eoa_system_profile') as SystemProfileType) || 'GENERAL';
@@ -62,10 +56,10 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [autoRefresh, setAutoRefresh] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  const [redMetrics, setRedMetrics] = useState<REDMetric[]>(SYSTEM_PROFILES[systemProfile].redMetrics);
-  const [anomalies, setAnomalies] = useState<Anomaly[]>(SYSTEM_PROFILES[systemProfile].anomalies);
-  const [spans, setSpans] = useState<Span[]>(SYSTEM_PROFILES[systemProfile].spans);
-  const [logs, setLogs] = useState<LogRecord[]>(SYSTEM_PROFILES[systemProfile].logs);
+  const [redMetrics, setRedMetrics] = useState<REDMetric[]>([]);
+  const [anomalies, setAnomalies] = useState<Anomaly[]>([]);
+  const [spans, setSpans] = useState<Span[]>([]);
+  const [logs, setLogs] = useState<LogRecord[]>([]);
   const [pipelineStatus] = useState<PipelineComponentStatus[]>(PIPELINE_STATUS);
 
   const [tick, setTick] = useState(0);
@@ -73,11 +67,6 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const setSystemProfile = (profile: SystemProfileType) => {
     setSystemProfileState(profile);
     localStorage.setItem('eoa_system_profile', profile);
-    const data = SYSTEM_PROFILES[profile];
-    setRedMetrics(data.redMetrics);
-    setAnomalies(data.anomalies);
-    setSpans(data.spans);
-    setLogs(data.logs);
   };
 
   const addCustomServiceTelemetry = (customName: string) => {
@@ -156,26 +145,9 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setLogs((prev) => [newLog, ...prev]);
   };
 
-  const login = (tenantId: string, key: string): boolean => {
-    if (
-      (tenantId.trim().toLowerCase() === 'demo' && key.trim() === 'eoa_cffdedbba2a3d4f0ecb4706923ae02d5d4b2ac1a0c03ff44') ||
-      (tenantId.trim().length > 0 && key.startsWith('eoa_'))
-    ) {
-      setTenant(tenantId.trim());
-      setApiKey(key.trim());
-      setIsAuthenticated(true);
-      localStorage.setItem('eoa_is_authenticated', 'true');
-      localStorage.setItem('eoa_auth_tenant', tenantId.trim());
-      localStorage.setItem('eoa_auth_key', key.trim());
-      return true;
-    }
-    return false;
-  };
-
-  const logout = () => {
-    setIsAuthenticated(false);
-    localStorage.removeItem('eoa_is_authenticated');
-  };
+  const login = (): boolean => true;
+  const logout = () => {};
+  const setTenant = () => {};
 
   const refreshData = () => {
     setTick((prev) => prev + 1);
@@ -196,17 +168,17 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const loadLiveTelemetry = async () => {
       try {
         const [liveRED, liveSpans, liveLogs, liveAnomalies] = await Promise.all([
-          fetchLiveREDMetrics(tenant, systemProfile),
-          fetchLiveTraces(tenant, systemProfile),
-          fetchLiveLogs(tenant, systemProfile),
-          fetchLiveAnomalies(tenant, systemProfile),
+          fetchLiveREDMetrics(),
+          fetchLiveTraces(),
+          fetchLiveLogs(),
+          fetchLiveAnomalies(),
         ]);
 
         if (isMounted) {
-          if (liveRED.length > 0) setRedMetrics(liveRED);
-          if (liveSpans.length > 0) setSpans(liveSpans);
-          if (liveLogs.length > 0) setLogs(liveLogs);
-          if (liveAnomalies.length > 0) setAnomalies(liveAnomalies);
+          setRedMetrics(liveRED);
+          setSpans(liveSpans);
+          setLogs(liveLogs);
+          setAnomalies(liveAnomalies);
         }
       } catch (err) {
         console.warn('Live telemetry sync failed:', err);
@@ -218,15 +190,15 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return () => {
       isMounted = false;
     };
-  }, [tick, tenant, systemProfile]);
+  }, [tick]);
 
   // Derived high-level stats
   const totalCalls = redMetrics.reduce((acc, m) => acc + m.callsPerMin, 0);
   const totalErrors = redMetrics.reduce((acc, m) => acc + m.errorCount, 0);
   const errorRate = totalCalls > 0 ? (totalErrors / totalCalls) * 100 : 0;
-  const avgP99Ms = Math.round(redMetrics.reduce((acc, m) => acc + m.p99Ms, 0) / redMetrics.length);
-  const totalSpansPerSec = Math.round(totalCalls / 60) + (tick % 7);
-  const totalLogsPerSec = Math.round(totalSpansPerSec * 1.8) + (tick % 11);
+  const avgP99Ms = redMetrics.length > 0 ? Math.round(redMetrics.reduce((acc, m) => acc + m.p99Ms, 0) / redMetrics.length) : 0;
+  const totalSpansPerSec = totalCalls > 0 ? Math.round(totalCalls / 60) : 0;
+  const totalLogsPerSec = logs.length > 0 ? Math.round(logs.length / 10) : 0;
 
   return (
     <TelemetryContext.Provider

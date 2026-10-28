@@ -10,21 +10,13 @@ import {
   Settings,
   Activity,
   Eye,
-  Key,
-  LogOut
+  Key
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
 import { useTelemetry } from '../../context/TelemetryContext';
 
 export const Sidebar: React.FC = () => {
-  const { tenant, anomalies, logout } = useTelemetry();
-  const navigate = useNavigate();
+  const { tenant, anomalies } = useTelemetry();
   const openAnomalies = anomalies.filter((a) => a.status === 'OPEN').length;
-
-  const handleSignOut = () => {
-    logout();
-    navigate('/login');
-  };
 
   return (
     <aside className="sidebar">
@@ -124,22 +116,6 @@ export const Sidebar: React.FC = () => {
           <span>Pipeline: NATS & CH Online</span>
           <Activity size={13} style={{ marginLeft: 'auto', color: 'var(--accent-emerald)' }} />
         </div>
-
-        <button
-          onClick={handleSignOut}
-          className="btn-secondary"
-          style={{
-            marginTop: '4px',
-            padding: '6px 10px',
-            fontSize: '0.74rem',
-            justifyContent: 'center',
-            color: 'var(--text-muted)',
-            width: '100%',
-          }}
-        >
-          <LogOut size={13} />
-          <span>Sign Out</span>
-        </button>
       </div>
     </aside>
   );

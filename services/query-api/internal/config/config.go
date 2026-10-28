@@ -11,6 +11,7 @@ import (
 
 // Config holds runtime settings for the Query API service.
 type Config struct {
+	TenantID           string
 	HTTPPort           string
 	ClickHouseAddr     string
 	ClickHouseDatabase string
@@ -26,6 +27,7 @@ type Config struct {
 // Load loads and validates configuration from environment variables.
 func Load() (*Config, error) {
 	cfg := &Config{
+		TenantID:           getEnv("TENANT_ID", "demo"),
 		HTTPPort:           getEnv("QUERY_API_PORT", "8082"),
 		ClickHouseAddr:     getEnv("CLICKHOUSE_ADDR", "127.0.0.1:9000"),
 		ClickHouseDatabase: getEnv("CLICKHOUSE_DATABASE", "observability"),

@@ -58,9 +58,9 @@ func run() error {
 	// 3. Instantiate QueryAPI Service
 	querySvc := service.NewQueryAPI(chClient, tailer)
 
-	// 4. Setup HTTP Handlers
+	// 4. Setup HTTP Handlers with fixed server tenant
 	mux := http.NewServeMux()
-	httpHandler := handler.NewHTTPHandler(querySvc)
+	httpHandler := handler.NewHTTPHandler(querySvc, cfg.TenantID)
 	httpHandler.RegisterRoutes(mux)
 
 	server := &http.Server{

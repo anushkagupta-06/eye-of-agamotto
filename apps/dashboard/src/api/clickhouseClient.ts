@@ -206,7 +206,7 @@ export async function fetchREDMetricsFromClickHouse(tenantId: string): Promise<R
       round(quantilesTDigestMerge(0.5, 0.95, 0.99)(duration_q)[2] / 1000000, 1) AS p95_ms,
       round(quantilesTDigestMerge(0.5, 0.95, 0.99)(duration_q)[3] / 1000000, 1) AS p99_ms
     FROM observability.latency_1m
-    WHERE tenant_id = '${tenantId}' AND window_start >= now() - INTERVAL 15 MINUTE
+    WHERE tenant_id = '${tenantId}' AND minute >= now() - INTERVAL 15 MINUTE
     GROUP BY service_name, operation
     ORDER BY calls_per_min DESC
     LIMIT 20

@@ -63,6 +63,33 @@ services:
       retries: 20
     restart: unless-stopped
 
+  query-api:
+    build:
+      context: .
+      dockerfile: services/query-api/Dockerfile
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+    environment:
+      QUERY_API_PORT: "8082"
+      TENANT_ID: "demo"
+      CLICKHOUSE_ADDR: "clickhouse:9000"
+      CLICKHOUSE_DATABASE: "observability"
+      CLICKHOUSE_USER: "reader"
+      CH_READER_PASSWORD: ${CH_READER_PASSWORD:?set CH_READER_PASSWORD in .env}
+      NATS_URL: "nats://nats:4222"
+      NATS_AUTH_TOKEN: ${NATS_AUTH_TOKEN:?set NATS_AUTH_TOKEN in .env}
+    ports:
+      - "127.0.0.1:8082:8082"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8082/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+    restart: unless-stopped
+
 volumes:
   nats-data:
   ch-data:
