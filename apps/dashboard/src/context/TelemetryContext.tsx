@@ -1,6 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { Anomaly, LogRecord, PipelineComponentStatus, REDMetric, Span } from '../types/telemetry';
 import { PIPELINE_STATUS, SYSTEM_PROFILES, type SystemProfileType } from '../api/telemetryClient';
+import {
+  fetchLiveREDMetrics,
+  fetchLiveTraces,
+  fetchLiveLogs,
+  fetchLiveAnomalies,
+} from '../api/liveTelemetryClient';
 
 interface TelemetryContextType {
   tenant: string;
@@ -182,6 +188,37 @@ export const TelemetryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }, 5000);
     return () => clearInterval(interval);
   }, [autoRefresh]);
+
+  // Synchronize dynamic live data from QueryAPI / ClickHouse backend
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadLiveTelemetry = async () => {
+      try {
+        const [liveRED, liveSpans, liveLogs, liveAnomalies] = await Promise.all([
+          fetchLiveREDMetrics(tenant, systemProfile),
+          fetchLiveTraces(tenant, systemProfile),
+          fetchLiveLogs(tenant, systemProfile),
+          fetchLiveAnomalies(tenant, systemProfile),
+        ]);
+
+        if (isMounted) {
+          if (liveRED.length > 0) setRedMetrics(liveRED);
+          if (liveSpans.length > 0) setSpans(liveSpans);
+          if (liveLogs.length > 0) setLogs(liveLogs);
+          if (liveAnomalies.length > 0) setAnomalies(liveAnomalies);
+        }
+      } catch (err) {
+        console.warn('Live telemetry sync failed:', err);
+      }
+    };
+
+    loadLiveTelemetry();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [tick, tenant, systemProfile]);
 
   // Derived high-level stats
   const totalCalls = redMetrics.reduce((acc, m) => acc + m.callsPerMin, 0);

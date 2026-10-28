@@ -32,6 +32,7 @@ func (h *HTTPHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/anomalies/", h.handleExplainAnomaly)
 	mux.HandleFunc("/api/v1/anomalies", h.handleGetAnomalies)
 	mux.HandleFunc("/api/v1/topology", h.handleGetTopology)
+	mux.HandleFunc("/api/v1/metrics/red", h.handleGetREDMetrics)
 }
 
 func (h *HTTPHandler) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -256,6 +257,26 @@ func (h *HTTPHandler) handleGetTopology(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, graph)
+}
+
+// handleGetREDMetrics returns live Rate, Errors, Duration metrics for microservices.
+// GET /api/v1/metrics/red
+func (h *HTTPHandler) handleGetREDMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	metrics, err := h.svc.GetREDMetrics(r.Context(), getTenant(r))
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"data":  metrics,
+		"count": len(metrics),
+	})
 }
 
 func getTenant(r *http.Request) string {

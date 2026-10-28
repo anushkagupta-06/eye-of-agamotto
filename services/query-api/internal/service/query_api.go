@@ -22,6 +22,7 @@ type QueryAPI interface {
 	GetAnomalies(ctx context.Context, tenantID string, r model.AnomalyRange) ([]*model.Anomaly, error)
 	ExplainAnomaly(ctx context.Context, tenantID, anomalyID string) (*model.Anomaly, error)
 	GetTopology(ctx context.Context, tenantID string, from, to time.Time) (*model.TopologyGraph, error)
+	GetREDMetrics(ctx context.Context, tenantID string) ([]*model.REDMetric, error)
 }
 
 // queryAPIService implements QueryAPI.
@@ -594,4 +595,140 @@ func (s *queryAPIService) GetTopology(ctx context.Context, tenantID string, from
 		Edges:    edges,
 		Services: services,
 	}, nil
+}
+
+// GetREDMetrics calculates live Rate, Errors, and Duration metrics for microservices.
+func (s *queryAPIService) GetREDMetrics(ctx context.Context, tenantID string) ([]*model.REDMetric, error) {
+	if tenantID == "" {
+		return nil, fmt.Errorf("tenantID is required")
+	}
+
+	conn := s.client.Conn()
+
+	// 1. First attempt querying the incrementally maintained latency_1m rollup table
+	rollupQuery := `
+		SELECT service_name, operation,
+		       toUInt64(sum(calls)) AS calls,
+		       toUInt64(sum(errors)) AS errors,
+		       quantilesTDigestMerge(0.5, 0.95, 0.99)(duration_q) AS quantiles
+		FROM observability.latency_1m
+		WHERE tenant_id = ?
+		  AND minute >= now() - INTERVAL 15 MINUTE
+		GROUP BY service_name, operation
+		ORDER BY calls DESC
+	`
+
+	rows, err := conn.Query(ctx, rollupQuery, tenantID)
+	if err == nil {
+		defer rows.Close()
+		var metrics []*model.REDMetric
+		for rows.Next() {
+			var (
+				serviceName string
+				operation   string
+				calls       uint64
+				errors      uint64
+				quantiles   []float64
+			)
+			if err := rows.Scan(&serviceName, &operation, &calls, &errors, &quantiles); err == nil {
+				callsPerMin := int64(calls / 15)
+				if callsPerMin < 1 && calls > 0 {
+					callsPerMin = int64(calls)
+				}
+				errorRate := 0.0
+				if calls > 0 {
+					errorRate = (float64(errors) / float64(calls)) * 100.0
+				}
+				var p50, p95, p99 float64
+				if len(quantiles) >= 3 {
+					p50 = quantiles[0] / 1e6
+					p95 = quantiles[1] / 1e6
+					p99 = quantiles[2] / 1e6
+				}
+				status := "HEALTHY"
+				if errorRate >= 2.0 || p95 >= 300 {
+					status = "CRITICAL"
+				} else if errorRate >= 0.8 || p95 >= 100 {
+					status = "DEGRADED"
+				}
+
+				metrics = append(metrics, &model.REDMetric{
+					ServiceName: serviceName,
+					Operation:   operation,
+					CallsPerMin: callsPerMin,
+					ErrorCount:  int64(errors),
+					ErrorRate:   errorRate,
+					P50Ms:       p50,
+					P95Ms:       p95,
+					P99Ms:       p99,
+					Status:      status,
+				})
+			}
+		}
+		if len(metrics) > 0 {
+			return metrics, nil
+		}
+	}
+
+	// 2. Fallback to raw spans if rollups have not yet run
+	spanQuery := `
+		SELECT service_name, name AS operation,
+		       count() AS calls,
+		       countIf(status_code = 'ERROR') AS errors,
+		       quantile(0.5)(duration_ns) / 1000000 AS p50,
+		       quantile(0.95)(duration_ns) / 1000000 AS p95,
+		       quantile(0.99)(duration_ns) / 1000000 AS p99
+		FROM observability.spans
+		WHERE tenant_id = ?
+		  AND start_time >= now() - INTERVAL 15 MINUTE
+		GROUP BY service_name, operation
+		ORDER BY calls DESC
+		LIMIT 50
+	`
+
+	sRows, err := conn.Query(ctx, spanQuery, tenantID)
+	if err != nil {
+		return []*model.REDMetric{}, nil
+	}
+	defer sRows.Close()
+
+	var metrics []*model.REDMetric
+	for sRows.Next() {
+		var (
+			serviceName string
+			operation   string
+			calls       uint64
+			errors      uint64
+			p50, p95, p99 float64
+		)
+		if err := sRows.Scan(&serviceName, &operation, &calls, &errors, &p50, &p95, &p99); err == nil {
+			callsPerMin := int64(calls / 15)
+			if callsPerMin < 1 && calls > 0 {
+				callsPerMin = int64(calls)
+			}
+			errorRate := 0.0
+			if calls > 0 {
+				errorRate = (float64(errors) / float64(calls)) * 100.0
+			}
+			status := "HEALTHY"
+			if errorRate >= 2.0 || p95 >= 300 {
+				status = "CRITICAL"
+			} else if errorRate >= 0.8 || p95 >= 100 {
+				status = "DEGRADED"
+			}
+			metrics = append(metrics, &model.REDMetric{
+				ServiceName: serviceName,
+				Operation:   operation,
+				CallsPerMin: callsPerMin,
+				ErrorCount:  int64(errors),
+				ErrorRate:   errorRate,
+				P50Ms:       p50,
+				P95Ms:       p95,
+				P99Ms:       p99,
+				Status:      status,
+			})
+		}
+	}
+
+	return metrics, nil
 }

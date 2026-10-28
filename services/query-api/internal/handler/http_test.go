@@ -94,6 +94,22 @@ func (m *mockQueryAPI) GetTopology(ctx context.Context, tenantID string, from, t
 	}, nil
 }
 
+func (m *mockQueryAPI) GetREDMetrics(ctx context.Context, tenantID string) ([]*model.REDMetric, error) {
+	return []*model.REDMetric{
+		{
+			ServiceName: "gateway",
+			Operation:   "ALL",
+			CallsPerMin: 12000,
+			ErrorCount:  10,
+			ErrorRate:   0.08,
+			P50Ms:       5.0,
+			P95Ms:       15.0,
+			P99Ms:       30.0,
+			Status:      "HEALTHY",
+		},
+	}, nil
+}
+
 func TestHTTPHandlerRoutes(t *testing.T) {
 	mockSvc := &mockQueryAPI{}
 	h := handler.NewHTTPHandler(mockSvc)
@@ -161,5 +177,13 @@ func TestHTTPHandlerRoutes(t *testing.T) {
 	}
 	if len(topo.Edges) != 1 || topo.Edges[0].Caller != "gateway" {
 		t.Errorf("unexpected topology edge: %+v", topo.Edges)
+	}
+
+	// 7. GetREDMetrics
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/metrics/red", nil)
+	rr = httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }
